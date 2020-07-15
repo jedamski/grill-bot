@@ -8,3 +8,7 @@ mkdir geometry
 cd gear-profile-generator
 python3 gear.py --teeth-count=9  --tooth-width=0.2715233655 --pressure-angle=15 --backlash=0.0 -t=dxf -o=../geometry/gear_small.dxf
 python3 gear.py --teeth-count=16 --tooth-width=0.2715233655 --pressure-angle=15 --backlash=0.0 -t=dxf -o=../geometry/gear_large.dxf
+
+# Now we're going to clean up
+cd ..
+rm -rf gear-profile-generator
