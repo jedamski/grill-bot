@@ -2,6 +2,7 @@ import atexit
 from adafruit_motorkit import MotorKit
 from adafruit_motor import stepper
 
+
 class Burner(stepper):
 
     def __init__(self, stepper_object, position=None, step='single'):
@@ -29,7 +30,7 @@ class Burner(stepper):
                *##                 |                 ##*
                  *#               Mid              ##*
                     *##          (0.5)          ##*
-                         *##        |        ##*
+                         *##       |        ##*
                             *** ### ### ***
         """
 
@@ -59,10 +60,10 @@ class Burner(stepper):
 
         # Calculate minimum burner increment in degrees allowable with current configuration
         self.min_burner_increment = self.stepper_increment*tooth_count_sec/tooth_count_pri
-
-        # Now that all settings are established, assign value to self.value
         self.stepper = stepper_object
-        self.value = None
+
+        # We always assume the grill starts out in the off position
+        self.__value = 1.5
 
     @property
     def value(self):
@@ -74,7 +75,7 @@ class Burner(stepper):
         # Limit input value to range of allowable inputs
         if value is None:
             value = 1.5
-        elif value > 1.5:
+        elif value > 1.0:
             value = 1.5
         elif value < 0.0:
             value = 0.0
