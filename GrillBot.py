@@ -1,3 +1,4 @@
+import logging
 import atexit
 from adafruit_motorkit import MotorKit
 from adafruit_motor import stepper
@@ -5,7 +6,7 @@ from adafruit_motor import stepper
 
 class Burner(stepper):
 
-    def __init__(self, stepper_object, position=None, step='single'):
+    def __init__(self, stepper_object, step='single'):
         """
         This class handles the grill controller abstraction. The user can treat
         this object as just a scalar variable and the class manages the details
@@ -34,8 +35,10 @@ class Burner(stepper):
                             *** ### ### ***
         """
 
-        # Specify the increments for the gearing, burner sector angle is the
-        # degrees corresponding to 1 unit on the burner set point scale
+        # Before we do anything, define the cleanup function. Turn the burner off when the program closes
+        atexit.register(cleanup)
+
+        # Specify the increments for the gearing, burner sector angle is the degrees corresponding to 1 unit on the burner set point scale
         burner_sector_angle = 180.0
         motor_increment = 1.8
 
@@ -74,22 +77,25 @@ class Burner(stepper):
 
         # Limit input value to range of allowable inputs
         if value is None:
+            logger.warning('Value set to None, turning the burner off')
             value = 1.5
         elif value > 1.0:
+            logger.warning('Value greater than 1.0 ({:1.2f}), turning the burner off'.format(value))
             value = 1.5
         elif value < 0.0:
+            logger.warning('Value less than 0.0 ({:1.2f}), limiting value to 0.0'.format(value))
             value = 0.0
 
         # Calculate the number of steps required to move
-        num_steps = np.abs(np.round((value - self.__value)*self.burner_sector_angle/self.burner_increment))
+        num_steps = np.abs(np.round((value - self.value)*self.burner_sector_angle/self.burner_increment))
 
         # Determine direction and number of steps required to reach set point
-        if value > self.__value:
+        if value > self.value:
             direction = stepper.FORWARD
-            new_value = self.__value + num_steps*self.burner_increment/self.burner_sector_angle
-        elif self.value < self.__value:
+            new_value = self.value + num_steps*self.burner_increment/self.burner_sector_angle
+        elif self.value < self.value:
             direction = stepper.BACKWARD
-            new_value = self.__value - num_steps*self.burner_increment/self.burner_sector_angle
+            new_value = self.value - num_steps*self.burner_increment/self.burner_sector_angle
         else:
             new_value = value
 
@@ -103,16 +109,36 @@ class Burner(stepper):
         # Always release the motor. Limits torque, but reduces overheating
         self.stepper.release()
 
-
     def cleanup(self):
-        """
-        """
 
         # The object is being deleted, turn the burner off
         self.value = None
 
-        # TODO: In case everything breaks, alert a separate script to launch to turn it off
-        pass
+
+class Thermocouple(object):
+
+    def __init__(self):
+        """
+        """
+
+        # Specify the IO ports that are wired
+        spi = busio.SPI(board.SCK, MOSI=board.MOSI, MISO=board.MISO)
+        cs = digitalio.DigitalInOut(board.D5)
+
+        # Define the board interface object
+        self.__max31855 = adafruit_max31855.MAX31855(spi, cs)
+
+    @property
+    def temperature(self):
+
+        # First grab the temperature value
+        temperature_F = self.__max31855.temperature*9.0/5.0 + 32.0
+
+        # Now log it before returning to the requesting function
+
+
+        return temperature_F
+
 
 class GrillBot(object):
 
@@ -121,11 +147,14 @@ class GrillBot(object):
         """
 
         # Define objects for both the front and back burners
-        self.burner_back  = None
-        self.burner_front = None
+        self.burner_back  = Burner(MotorKit.stepper1, step='single')
+        self.burner_front = Burner(MotorKit.stepper1, step='single')
+        atexit.register(self.burner_back.cleanup)
+        atexit.register(self.burner_front.cleanup)
 
-        def cleanup():
-            cache_file.close()
-            os.remove(cache_filename)
+    @property
+    def temperature(self):
+        """
+        """
 
-        atexit.register(cleanup)
+        return
