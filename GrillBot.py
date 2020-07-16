@@ -68,6 +68,20 @@ class Burner(stepper):
         # We always assume the grill starts out in the off position
         self.__value = 1.5
 
+    def __ignite(self):
+
+        # self.__value should be set to None, change to 1.5
+        self.__value = 1.5
+
+        # First, move the burner to the ignite position
+        self.value = 1.0
+
+        # Tell the user to press the ignite button
+        self.display.print("Press ignite button...")
+
+        # Now sleep for 5 seconds and wait for the user to press
+        time.sleep(5.0)
+
     @property
     def value(self):
         return self.__value
@@ -75,10 +89,14 @@ class Burner(stepper):
     @value.setter
     def value(self, value):
 
+        # Check if we need to execute the ignition sequence
+        if self.__value is None:
+            if value is not None:
+                self.__ignite()
+
         # Limit input value to range of allowable inputs
         if value is None:
             logger.warning('Value set to None, turning the burner off')
-            value = 1.5
         elif value > 1.0:
             logger.warning('Value greater than 1.0 ({:1.2f}), turning the burner off'.format(value))
             value = 1.5
@@ -104,7 +122,10 @@ class Burner(stepper):
             self.stepper.onestep(direction=stepper, style=self.stepper_increment)
 
         # After the motor has successfully moved, update the value
-        self.__value = new_value
+        if new_value == 1.5:
+            self.__value = None
+        else:
+            self.__value = new_value
 
         # Always release the motor. Limits torque, but reduces overheating
         self.stepper.release()
@@ -130,6 +151,10 @@ class Thermocouple(object):
 
     @property
     def temperature(self):
+        """
+        This function returns a floating point number when asked. Once it
+        retrieves the value, it will store it in the MongoDB database.
+        """
 
         # First grab the temperature value
         temperature_F = self.__max31855.temperature*9.0/5.0 + 32.0
@@ -139,6 +164,10 @@ class Thermocouple(object):
 
         return temperature_F
 
+    class Display(object):
+
+        def __init__(self):
+            pass
 
 class GrillBot(object):
 
@@ -148,9 +177,17 @@ class GrillBot(object):
 
         # Define objects for both the front and back burners
         self.burner_back  = Burner(MotorKit.stepper1, step='single')
-        self.burner_front = Burner(MotorKit.stepper1, step='single')
+        self.burner_front = Burner(MotorKit.stepper2, step='single')
         atexit.register(self.burner_back.cleanup)
         atexit.register(self.burner_front.cleanup)
+
+        self.burner_front.value = 0.72
+        time.sleep(1.0)
+        self.burner_front.value = None
+
+
+        self.thermometer = Thermocouple()
+        print self.thermometer.temperature
 
     @property
     def temperature(self):
