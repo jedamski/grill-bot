@@ -1,5 +1,6 @@
 import logging
 import atexit
+from time import sleep
 from adafruit_motorkit import MotorKit
 from adafruit_motor import stepper
 
@@ -188,15 +189,20 @@ class Thermocouple(object):
             # Wipe the LCD screen before we start
             lcd.clear()
 
+            # Add a welcome message for the user and sleep for at least 1 second
+            lcd.message('  Hello World!  \n  I''m GrillBot  ')
+            sleep(1.0)
+
         def display_status(input_front, input_back, temperature):
 
-            #
-            if input_front is None:
+            # Add some data type catching to handle case when burner is off
+            if (input_front is None) or (input_front == 1.5):
                 input_front_str = 'OFF'
             else:
                 input_front_str = '{:2.0f}%'.format(input_front)
 
-            if input_back is None:
+            # Add some data type catching to handle case when burner is off
+            if (input_back is None) or (input_back == 1.5):
                 input_back_str = 'OFF'
             else:
                 input_back_str = '{:2.0f}%'.format(input_back)
@@ -205,6 +211,17 @@ class Thermocouple(object):
             message = 'Temp: {:3.0f} F\nF: ' + input_front_str + ' / B: ' + input_back_str
             lcd.message = message
 
+        def miscellaneous_message(message):
+
+            # Need to confirm message is less than 2x16 characters
+            lines = message.split('\n')
+
+            if len(lines) > self.rows:
+                raise ValueError('Message has two many rows ({:})'.format(len(lines)))
+
+            for ind, line in enumerate(lines):
+                if len(line > self.columns):
+                    raise ValueError('Line {:} of the message has two many columns ({:})'.format(ind+1, len(line)))
 
 class GrillBot(object):
 
