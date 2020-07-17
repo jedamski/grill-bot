@@ -135,16 +135,18 @@ class Burner(stepper):
         # The object is being deleted, turn the burner off
         self.value = None
 
-
 class Thermocouple(object):
 
-    def __init__(self):
+    def __init__(self, io_pin=board.D5):
         """
+        This class acts as an interface for the max31855 board and Thermocouple
+        mounted in the grill. The class returns temperature readings in
+        Fahrenheit and logs all requests in the MongoDB database.
         """
 
         # Specify the IO ports that are wired
         spi = busio.SPI(board.SCK, MOSI=board.MOSI, MISO=board.MISO)
-        cs = digitalio.DigitalInOut(board.D5)
+        cs = digitalio.DigitalInOut(io_pin)
 
         # Define the board interface object
         self.__max31855 = adafruit_max31855.MAX31855(spi, cs)
@@ -167,7 +169,42 @@ class Thermocouple(object):
     class Display(object):
 
         def __init__(self):
-            pass
+
+            # Define the geometry of the display
+            self.columns = 16
+            self.rows = 2
+
+            # Define which pins are used for the display
+            lcd_rs = digitalio.DigitalInOut(board.D22)
+            lcd_en = digitalio.DigitalInOut(board.D17)
+            lcd_d4 = digitalio.DigitalInOut(board.D25)
+            lcd_d5 = digitalio.DigitalInOut(board.D24)
+            lcd_d6 = digitalio.DigitalInOut(board.D23)
+            lcd_d7 = digitalio.DigitalInOut(board.D18)
+
+            # Initialise the lcd class from adafruit
+            self.lcd = characterlcd.Character_LCD_Mono(lcd_rs, lcd_en, lcd_d4, lcd_d5, lcd_d6, lcd_d7, lcd_columns, lcd_rows)
+
+            # Wipe the LCD screen before we start
+            lcd.clear()
+
+        def display_status(input_front, input_back, temperature):
+
+            #
+            if input_front is None:
+                input_front_str = 'OFF'
+            else:
+                input_front_str = '{:2.0f}%'.format(input_front)
+
+            if input_back is None:
+                input_back_str = 'OFF'
+            else:
+                input_back_str = '{:2.0f}%'.format(input_back)
+
+            # Update the LCD message based on the current temp and burner inputs
+            message = 'Temp: {:3.0f} F\nF: ' + input_front_str + ' / B: ' + input_back_str
+            lcd.message = message
+
 
 class GrillBot(object):
 
@@ -177,21 +214,12 @@ class GrillBot(object):
 
         # Define objects for both the front and back burners
         self.burner_back  = Burner(MotorKit.stepper1, step='single')
-        self.burner_front = Burner(MotorKit.stepper2, step='single')
-        atexit.register(self.burner_back.cleanup)
-        atexit.register(self.burner_front.cleanup)
+        self.burner_front = Burner(MotorKit.stepper2, step='single'
 
-        self.burner_front.value = 0.72
-        time.sleep(1.0)
-        self.burner_front.value = None
-
-
+        # Create the thermocouple object and take an ambient reading before doing anything
         self.thermometer = Thermocouple()
-        print self.thermometer.temperature
+        print('Initialized temperature: {:3.0f} F'.format(self.thermometer.temperature))
 
-    @property
-    def temperature(self):
-        """
-        """
-
-        return
+        # Now turn both burners on, this steps takes about 10 seconds to initialize
+        self.burner_front.value = 1.0
+        self.burner_back.value = 1.0
