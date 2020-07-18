@@ -169,7 +169,7 @@ class Thermocouple(object):
 
     class Display(object):
 
-        def __init__(self):
+        def __init__(self, startup_message='  Hello World!  \n  I''m GrillBot'):
 
             # Define the geometry of the display
             self.columns = 16
@@ -187,13 +187,46 @@ class Thermocouple(object):
             self.lcd = characterlcd.Character_LCD_Mono(lcd_rs, lcd_en, lcd_d4, lcd_d5, lcd_d6, lcd_d7, lcd_columns, lcd_rows)
 
             # Wipe the LCD screen before we start
-            lcd.clear()
+            self.lcd.clear()
 
             # Add a welcome message for the user and sleep for at least 1 second
-            lcd.message('  Hello World!  \n  I''m GrillBot  ')
+            self.lcd.message(startup_message)
             sleep(1.0)
 
-        def display_status(input_front, input_back, temperature):
+        def message(message):
+
+            # Need to confirm message is less than 2x16 characters
+            lines = message.split('\n')
+
+            if len(lines) > self.rows:
+                raise ValueError('Message has two many rows ({:})'.format(len(lines)))
+
+            # Loop through and confirm the message meets the specific LCD requirements
+            for ind, line in enumerate(lines):
+                if len(line > self.columns):
+                    raise ValueError('Line {:} of the message has two many columns ({:})'.format(ind+1, len(line)))
+                else:
+
+                    # If the line is short enough, append to the final message
+                    if ind == 0:
+                        message_out = line
+                    else:
+                        message_out = '\n' + line
+
+            # Now send the reconstructed message to the lcd display
+            self.lcd.message = message_out
+
+    class GrillDisplay(Display):
+
+        def __init__(self, startup_message=None):
+
+            # Pass in the GrillBot specific startup message to the display class
+            if startup_message is None:
+                super().__init__(startup_message='  Hello World!  \n  I''m GrillBot')
+            else:
+                super().__init__()
+
+        def display_status(self, input_front, input_back, temperature):
 
             # Add some data type catching to handle case when burner is off
             if (input_front is None) or (input_front == 1.5):
@@ -209,19 +242,7 @@ class Thermocouple(object):
 
             # Update the LCD message based on the current temp and burner inputs
             message = 'Temp: {:3.0f} F\nF: ' + input_front_str + ' / B: ' + input_back_str
-            lcd.message = message
-
-        def miscellaneous_message(message):
-
-            # Need to confirm message is less than 2x16 characters
-            lines = message.split('\n')
-
-            if len(lines) > self.rows:
-                raise ValueError('Message has two many rows ({:})'.format(len(lines)))
-
-            for ind, line in enumerate(lines):
-                if len(line > self.columns):
-                    raise ValueError('Line {:} of the message has two many columns ({:})'.format(ind+1, len(line)))
+            self.message = message
 
 class GrillBot(object):
 
