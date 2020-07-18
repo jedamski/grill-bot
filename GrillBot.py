@@ -72,6 +72,10 @@ class Burner(stepper):
         # We always assume the grill starts out in the off position
         self.__value = 1.5
 
+        # Alright, time to start the grill
+        self.ignite()
+        self.display.message('')
+
     @property
     def value(self):
         return self.__value
@@ -80,9 +84,9 @@ class Burner(stepper):
     def value(self, value):
 
         # Check if we need to execute the ignition sequence
-        if self.__value is None:
+        if self.value is None:
             if value is not None:
-                self.__ignite()
+                self.ignite()
 
         # Limit input value to range of allowable inputs
         if value is None:
@@ -125,10 +129,17 @@ class Burner(stepper):
         # The object is being deleted, turn the burner off
         self.value = None
 
-    def __ignite(self):
+    def ignite(self):
+        """
+        This function is called upon class instanciation. The user is required
+        to depress the gas knob to bypass the physical stop on the grill. The
+        user presses the knob down and the stepper mover moves the knob to the
+        ignition position. From there, the user then has 3 seconds to press the
+        igniter.
+        """
 
         # self.__value should be set to None, change to 1.5
-        self.__value = 1.5
+        self.value = 1.5
 
         # Have the user press the knob down, to bypass the physical stop
         self.display.message('Press ' + self.position '\nburner down... 5')
@@ -143,6 +154,7 @@ class Burner(stepper):
         sleep(1.0)
 
         # First, move the burner to the ignite position
+        self.display.message('Good job, you can\nlet go now')
         self.value = 1.0
 
         # Tell the user to press the ignite button
@@ -152,6 +164,9 @@ class Burner(stepper):
         sleep(1.0)
         self.display.message("Press ignite\nbutton... 1")
         sleep(1.0)
+        self.display.message("Good job!")
+        sleep(2.0)
+
 
 class Thermocouple(object):
 
@@ -267,14 +282,17 @@ class GrillBot(object):
         """
         """
 
+        # Create the grill display so that it's ready for the burner object creation
+        self.display = GrillDisplay()
+
         # Define objects for both the front and back burners
-        self.burner_back  = Burner(MotorKit.stepper1, step='single')
-        self.burner_front = Burner(MotorKit.stepper2, step='single'
+        self.burner_back  = Burner(MotorKit.stepper1, step='single', display=self.display)
+        self.burner_front = Burner(MotorKit.stepper2, step='single', display=self.display)
 
         # Create the thermocouple object and take an ambient reading before doing anything
         self.thermometer = Thermocouple()
-        print('Initialized temperature: {:3.0f} F'.format(self.thermometer.temperature))
+        self.display_status()
 
-        # Now turn both burners on, this steps takes about 10 seconds to initialize
-        self.burner_front.value = 1.0
-        self.burner_back.value = 1.0
+    def display_status(self):
+
+        self.display.display_status(self.burner_front, self.burner_back, self.thermometer.temperature)
