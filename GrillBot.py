@@ -7,7 +7,7 @@ from adafruit_motor import stepper
 
 class Burner(stepper):
 
-    def __init__(self, stepper_object, step='single'):
+    def __init__(self, position, stepper_object, step='single'):
         """
         This class handles the grill controller abstraction. The user can treat
         this object as just a scalar variable and the class manages the details
@@ -48,6 +48,9 @@ class Burner(stepper):
         tooth_count_pri = 16.0
         self.gear_ratio = tooth_count_sec/tooth_count_pri
 
+        # This descriptor is a positional descriptor for the user
+        self.position = postion
+
         # Get the specific stepper increment, stepper motor can manage three types
         if step == 'single':
             self.burner_increment = motor_increment
@@ -68,20 +71,6 @@ class Burner(stepper):
 
         # We always assume the grill starts out in the off position
         self.__value = 1.5
-
-    def __ignite(self):
-
-        # self.__value should be set to None, change to 1.5
-        self.__value = 1.5
-
-        # First, move the burner to the ignite position
-        self.value = 1.0
-
-        # Tell the user to press the ignite button
-        self.display.print("Press ignite button...")
-
-        # Now sleep for 5 seconds and wait for the user to press
-        time.sleep(5.0)
 
     @property
     def value(self):
@@ -135,6 +124,34 @@ class Burner(stepper):
 
         # The object is being deleted, turn the burner off
         self.value = None
+
+    def __ignite(self):
+
+        # self.__value should be set to None, change to 1.5
+        self.__value = 1.5
+
+        # Have the user press the knob down, to bypass the physical stop
+        self.display.message('Press ' + self.position '\nburner down... 5')
+        sleep(1.0)
+        self.display.message('Press ' + self.position '\nburner down... 4')
+        sleep(1.0)
+        self.display.message('Press ' + self.position '\nburner down... 3')
+        sleep(1.0)
+        self.display.message('Press ' + self.position '\nburner down... 2')
+        sleep(1.0)
+        self.display.message('Press ' + self.position '\nburner down... 1')
+        sleep(1.0)
+
+        # First, move the burner to the ignite position
+        self.value = 1.0
+
+        # Tell the user to press the ignite button
+        self.display.message("Press ignite\nbutton... 3")
+        sleep(1.0)
+        self.display.message("Press ignite\nbutton... 2")
+        sleep(1.0)
+        self.display.message("Press ignite\nbutton... 1")
+        sleep(1.0)
 
 class Thermocouple(object):
 
