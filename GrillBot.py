@@ -1,9 +1,10 @@
+import datetime
 import logging
 import atexit
 import uuid
-from time import sleep
 from adafruit_motorkit import MotorKit
 from adafruit_motor import stepper
+from time import sleep
 
 
 class Burner(stepper):
@@ -301,10 +302,14 @@ class GrillDatabase(object):
 
     def add_entry(temperature, set_temperature, front_burner, back_burner):
 
-        db.__sessions.find_one_and_update({'_session_id': self.session_id}, {'$temperature': temperature,
-                                                                             '$front_burner': front_burner.value,
-                                                                             '$back_burner': back_burner.value,
-                                                                             '$set_temperature': set_temperature})
+        db.__sessions.find_one_and_update({'_session_id': self.session_id},
+                                          {'$push': {'time': new Timestamp(),
+                                                     'temperature': temperature,
+                                                     'front_burner': front_burner.value,
+                                                     'back_burner': back_burner.value,
+                                                     'set_temperature': set_temperature}})
+
+        # TODO: Add code for the case where it can't find the entry
 
 class GrillBot(object):
 
