@@ -1,10 +1,10 @@
+from adafruit_motorkit import MotorKit
+from adafruit_motor import stepper
+from time import sleep
 import datetime
 import logging
 import atexit
 import uuid
-from adafruit_motorkit import MotorKit
-from adafruit_motor import stepper
-from time import sleep
 
 
 class Burner(stepper):
@@ -169,7 +169,6 @@ class Burner(stepper):
         self.display.message("Good job!")
         sleep(2.0)
 
-
 class Thermocouple(object):
 
     def __init__(self, io_pin=board.D5):
@@ -179,12 +178,15 @@ class Thermocouple(object):
         Fahrenheit and logs all requests in the MongoDB database.
         """
 
-        # Specify the IO ports that are wired
-        spi = busio.SPI(board.SCK, MOSI=board.MOSI, MISO=board.MISO)
-        cs = digitalio.DigitalInOut(io_pin)
+        try:
+            # Specify the IO ports that are wired
+            spi = busio.SPI(board.SCK, MOSI=board.MOSI, MISO=board.MISO)
+            cs = digitalio.DigitalInOut(io_pin)
 
-        # Define the board interface object
-        self.__max31855 = adafruit_max31855.MAX31855(spi, cs)
+            # Define the board interface object
+            self.__max31855 = adafruit_max31855.MAX31855(spi, cs)
+        except:
+            raise IOError('There was an error establishing the max31855 thermocouple interface')
 
     @property
     def temperature(self):
@@ -193,87 +195,91 @@ class Thermocouple(object):
         retrieves the value, it will store it in the MongoDB database.
         """
 
-        # First grab the temperature value
-        temperature_F = self.__max31855.temperature*9.0/5.0 + 32.0
+        try:
+            # Try retrieving the temperature from the chip
+            temperature_F = self.__max31855.temperature*9.0/5.0 + 32.0
+        except:
+            # If it doesn't work, return a nan
+            temperature_F = np.nan
 
         return temperature_F
 
-    class Display(object):
+class Display(object):
 
-        def __init__(self, startup_message='  Hello World!  \n  I''m GrillBot'):
+    def __init__(self, startup_message='  Hello World!  \n  I''m GrillBot'):
 
-            # Define the geometry of the display
-            self.columns = 16
-            self.rows = 2
+        # Define the geometry of the display
+        self.columns = 16
+        self.rows = 2
 
-            # Define which pins are used for the display
-            lcd_rs = digitalio.DigitalInOut(board.D22)
-            lcd_en = digitalio.DigitalInOut(board.D17)
-            lcd_d4 = digitalio.DigitalInOut(board.D25)
-            lcd_d5 = digitalio.DigitalInOut(board.D24)
-            lcd_d6 = digitalio.DigitalInOut(board.D23)
-            lcd_d7 = digitalio.DigitalInOut(board.D18)
+        # Define which pins are used for the display
+        lcd_rs = digitalio.DigitalInOut(board.D22)
+        lcd_en = digitalio.DigitalInOut(board.D17)
+        lcd_d4 = digitalio.DigitalInOut(board.D25)
+        lcd_d5 = digitalio.DigitalInOut(board.D24)
+        lcd_d6 = digitalio.DigitalInOut(board.D23)
+        lcd_d7 = digitalio.DigitalInOut(board.D18)
 
-            # Initialise the lcd class from adafruit
-            self.lcd = characterlcd.Character_LCD_Mono(lcd_rs, lcd_en, lcd_d4, lcd_d5, lcd_d6, lcd_d7, lcd_columns, lcd_rows)
+        # Initialise the lcd class from adafruit
+        self.lcd = characterlcd.Character_LCD_Mono(lcd_rs, lcd_en, lcd_d4, lcd_d5, lcd_d6, lcd_d7, lcd_columns, lcd_rows)
 
-            # Wipe the LCD screen before we start
-            self.lcd.clear()
+        # Wipe the LCD screen before we start
+        self.lcd.clear()
 
-            # Add a welcome message for the user and sleep for at least 1 second
-            self.lcd.message(startup_message)
-            sleep(1.0)
+        # Add a welcome message for the user and sleep for at least 1 second
+        self.lcd.message(startup_message)
+        sleep(1.0)
 
-        def message(message):
+    def message(message):
 
-            # Need to confirm message is less than 2x16 characters
-            lines = message.split('\n')
+        # Need to confirm message is less than 2x16 characters
+        lines = message.split('\n')
 
-            if len(lines) > self.rows:
-                raise ValueError('Message has two many rows ({:})'.format(len(lines)))
+        if len(lines) > self.rows:
+            raise ValueError('Message has two many rows ({:})'.format(len(lines)))
 
-            # Loop through and confirm the message meets the specific LCD requirements
-            for ind, line in enumerate(lines):
-                if len(line > self.columns):
-                    raise ValueError('Line {:} of the message has two many columns ({:})'.format(ind+1, len(line)))
+        # Loop through and confirm the message meets the specific LCD requirements
+        for ind, line in enumerate(lines):
+            if len(line > self.columns):
+                raise ValueError('Line {:} of the message has two many columns ({:})'.format(ind+1, len(line)))
+            else:
+
+                # If the line is short enough, append to the final message
+                if ind == 0:
+                    message_out = line
                 else:
+                    message_out = '\n' + line
 
-                    # If the line is short enough, append to the final message
-                    if ind == 0:
-                        message_out = line
-                    else:
-                        message_out = '\n' + line
+        # Now send the reconstructed message to the lcd display
+        self.lcd.message = message_out
 
-            # Now send the reconstructed message to the lcd display
-            self.lcd.message = message_out
+class GrillDisplay(Display):
 
-    class GrillDisplay(Display):
+    def __init__(self, startup_message=None):
 
-        def __init__(self, startup_message=None):
+        # Pass in the GrillBot specific startup message to the display class
+        if startup_message is None:
+            super().__init__(startup_message='  Hello World!  \n  I''m GrillBot')
+        else:
+            super().__init__()
 
-            # Pass in the GrillBot specific startup message to the display class
-            if startup_message is None:
-                super().__init__(startup_message='  Hello World!  \n  I''m GrillBot')
-            else:
-                super().__init__()
+    def display_status(self, input_front, input_back, temperature, amb_temperature):
 
-        def display_status(self, input_front, input_back, temperature):
+        # Add some data type catching to handle case when burner is off
+        if (input_front is None) or (input_front == 1.5):
+            input_front_str = 'OFF'
+        else:
+            input_front_str = '{:2.0f}%'.format(input_front.value*100)
 
-            # Add some data type catching to handle case when burner is off
-            if (input_front is None) or (input_front == 1.5):
-                input_front_str = 'OFF'
-            else:
-                input_front_str = '{:2.0f}%'.format(input_front.value*100)
+        # Add some data type catching to handle case when burner is off
+        if (input_back is None) or (input_back == 1.5):
+            input_back_str = 'OFF'
+        else:
+            input_back_str = '{:2.0f}%'.format(input_back.value*100)
 
-            # Add some data type catching to handle case when burner is off
-            if (input_back is None) or (input_back == 1.5):
-                input_back_str = 'OFF'
-            else:
-                input_back_str = '{:2.0f}%'.format(input_back.value*100)
-
-            # Update the LCD message based on the current temp and burner inputs
-            message = 'Temp: {:3.0f} F\nF: ' + input_front_str + ' / B: ' + input_back_str
-            self.message = message
+        # Update the LCD message based on the current temp and burner inputs
+        message = 'Temp: {:3.0f} / {:3.0f}\nF: '.format(temperature, amb_temperature) + input_front_str + ' / B: ' + input_back_str
+        self.message = message
 
 class GrillDatabase(object):
 
@@ -311,6 +317,22 @@ class GrillDatabase(object):
 
         # TODO: Add code for the case where it can't find the entry
 
+    def load_model_parameters(self):
+
+    def save_model_parameters(self):
+        # Assumed physical model
+        # dT/dt = a*(T - Tamb) + b*u(t) + c
+
+        self.__client.model['form'] = 'dT/dt = a*(T - Tamb) + b*u(t) + c'
+        self.__client.model['a'] =
+        self.__client.model['b'] =
+        self.__client.model['c'] =
+
+class Weather(object):
+
+    def __init__(self):
+        pass
+
 class GrillBot(object):
 
     def __init__(self):
@@ -319,28 +341,35 @@ class GrillBot(object):
 
         # Create a unique session id for the database
         self.session_id = uuid4()
+        self.database = GrillDatabase()
 
         # Create the grill display so that it's ready for the burner object creation
         self.display = GrillDisplay()
+
+        # Create the thermocouple object and take an ambient reading before doing anything
+        self.thermocouple = Thermocouple()
+        self.weather = Weather()
 
         # Define objects for both the front and back burners
         self.burner_back  = Burner(MotorKit.stepper1, step='single', display=self.display)
         self.burner_front = Burner(MotorKit.stepper2, step='single', display=self.display)
 
-        # Create the thermocouple object and take an ambient reading before doing anything
-        self.thermometer = Thermocouple()
+        # Now that all hardware interfaces are established, print current status
         self.display_status()
 
     def display_status(self):
 
-        temperature = self.thermometer.temperature
+        # Grab the current temperature and log it in the database
+        temperature = self.thermocouple.temperature
+        temperature_amb = self.weather.temperature
 
-
-        self.display.display_status(self.burner_front, self.burner_back, temperature)
+        # Display the current status to the user
+        self.database.add_entry(temperature, temperature_amb, self.set_temperature, self.front_burner, self.back_burner)
+        self.display.display_status(self.burner_front, self.burner_back, temperature, temperature_amb)
 
     def load_data(self):
 
-        self.session_id
+        pass
 
     def train(self):
 
