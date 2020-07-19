@@ -296,3 +296,20 @@ class GrillBot(object):
     def display_status(self):
 
         self.display.display_status(self.burner_front, self.burner_back, self.thermometer.temperature)
+
+    def train(self):
+
+        # First, let's set both of the burners to full power
+        self.burner_front.value = 1.0
+        self.burner_front.value = 1.0
+
+        # Alert the user before logging all of the data
+        self.display.message('We gonna train\nCome back in 10')
+        sleep(3)
+
+        # Now, save off the temp every 5 seconds for 10 minutes
+        for t in np.arange(0, 5*60*10, 5):
+
+            # Display status will check the temperature and in doing so, will save the temperature into the database
+            self.display_status()
+            sleep(5)
