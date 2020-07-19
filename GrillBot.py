@@ -1,5 +1,6 @@
 import logging
 import atexit
+import uuid
 from time import sleep
 from adafruit_motorkit import MotorKit
 from adafruit_motor import stepper
@@ -99,7 +100,7 @@ class Burner(stepper):
             value = 0.0
 
         # Calculate the number of steps required to move
-        num_steps = np.abs(np.round((value - self.value)*self.burner_sector_angle/self.burner_increment))
+        num_steps = np.floor(np.abs((value - self.value)*self.burner_sector_angle/self.burner_increment))
 
         # Determine direction and number of steps required to reach set point
         if value > self.value:
@@ -194,9 +195,6 @@ class Thermocouple(object):
         # First grab the temperature value
         temperature_F = self.__max31855.temperature*9.0/5.0 + 32.0
 
-        # Now log it before returning to the requesting function
-
-
         return temperature_F
 
     class Display(object):
@@ -264,23 +262,58 @@ class Thermocouple(object):
             if (input_front is None) or (input_front == 1.5):
                 input_front_str = 'OFF'
             else:
-                input_front_str = '{:2.0f}%'.format(input_front)
+                input_front_str = '{:2.0f}%'.format(input_front.value*100)
 
             # Add some data type catching to handle case when burner is off
             if (input_back is None) or (input_back == 1.5):
                 input_back_str = 'OFF'
             else:
-                input_back_str = '{:2.0f}%'.format(input_back)
+                input_back_str = '{:2.0f}%'.format(input_back.value*100)
 
             # Update the LCD message based on the current temp and burner inputs
             message = 'Temp: {:3.0f} F\nF: ' + input_front_str + ' / B: ' + input_back_str
             self.message = message
+
+class GrillDatabase(object):
+
+    def __init__(self, URI='mongodb://localhost:27017', verbose=session):
+        """
+        This manages both downloading data from the USDA API as well as cacheing
+        it and retrieving it when nevessary.
+        """
+        # Initialize the client and  connect to the ingredients collection
+        self.__client = pymongo.MongoClient('mongodb://localhost:27017')
+
+        # I think ingredients is a collection
+        self.start_time = datetime.datetime.now()
+        self.session_id = uuid4()
+        self.__sessions = self.__client.sessions
+
+        # Create a unique entry for the current session
+        self.__sessions[self.session_id]
+
+        # Initialize the empty arrays
+        self.__sessions[self.session_id]['time']            = np.array([], dtype=datetime)
+        self.__sessions[self.session_id]['temperature']     = np.array([], dtype=float)
+        self.__sessions[self.session_id]['front_burner']    = np.array([], dtype=float)
+        self.__sessions[self.session_id]['back_burner']     = np.array([], dtype=float)
+        self.__sessions[self.session_id]['set_temperature'] = np.array([], dtype=float)
+
+    def add_entry(temperature, set_temperature, front_burner, back_burner):
+
+        db.__sessions.find_one_and_update({'_session_id': self.session_id}, {'$temperature': temperature,
+                                                                             '$front_burner': front_burner.value,
+                                                                             '$back_burner': back_burner.value,
+                                                                             '$set_temperature': set_temperature})
 
 class GrillBot(object):
 
     def __init__(self):
         """
         """
+
+        # Create a unique session id for the database
+        self.session_id = uuid4()
 
         # Create the grill display so that it's ready for the burner object creation
         self.display = GrillDisplay()
@@ -295,7 +328,14 @@ class GrillBot(object):
 
     def display_status(self):
 
-        self.display.display_status(self.burner_front, self.burner_back, self.thermometer.temperature)
+        temperature = self.thermometer.temperature
+
+
+        self.display.display_status(self.burner_front, self.burner_back, temperature)
+
+    def load_data(self):
+
+        self.session_id
 
     def train(self):
 
@@ -304,12 +344,15 @@ class GrillBot(object):
         self.burner_front.value = 1.0
 
         # Alert the user before logging all of the data
-        self.display.message('We gonna train\nCome back in 10')
+        self.display.message('Training time\nCome back in 10')
         sleep(3)
 
         # Now, save off the temp every 5 seconds for 10 minutes
-        for t in np.arange(0, 5*60*10, 5):
+        for t in np.arange(0, 5*60*10+5, 5):
 
             # Display status will check the temperature and in doing so, will save the temperature into the database
             self.display_status()
             sleep(5)
+
+        # Grab all of the data that has been logged so far in this session
+        time, temp, input = self.load_data()
