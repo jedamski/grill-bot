@@ -311,18 +311,17 @@ class GrillDatabase(object):
 
     def __init__(self, URI='mongodb://localhost:27017', verbose=session):
         """
-        This manages both downloading data from the USDA API as well as cacheing
-        it and retrieving it when nevessary.
+        This manages all data storage needs for the grill, including temperature
+        data, weather information, model training data, and model coefficients
+        for the thermodynamic model and the associated controller.
         """
+
         # Initialize the client and  connect to the ingredients collection
         self.__client = pymongo.MongoClient('mongodb://localhost:27017')
 
-        # I think ingredients is a collection
-        self.start_time = datetime.datetime.now()
+        # Define a unique session id and create a session for it
         self.session_id = uuid4()
         self.__sessions = self.__client.sessions
-
-        # Create a unique entry for the current session
         self.__sessions[self.session_id]
 
         # Initialize the empty arrays
@@ -344,15 +343,23 @@ class GrillDatabase(object):
         # TODO: Add code for the case where it can't find the entry
 
     def load_model_parameters(self):
+        # Assumed physical model
+        # dT/dt = a*(T - Tamb) + b*u(t) + c
 
-    def save_model_parameters(self):
+        a = self.__client.model['a']
+        b = self.__client.model['b']
+        c = self.__client.model['c']
+
+        return a, b, c
+
+    def save_model_parameters(self, a, b, c):
         # Assumed physical model
         # dT/dt = a*(T - Tamb) + b*u(t) + c
 
         self.__client.model['form'] = 'dT/dt = a*(T - Tamb) + b*u(t) + c'
-        self.__client.model['a'] =
-        self.__client.model['b'] =
-        self.__client.model['c'] =
+        self.__client.model['a'] = a
+        self.__client.model['b'] = b
+        self.__client.model['c'] = c
 
 class Weather(object):
 
@@ -407,10 +414,40 @@ class GrillBot(object):
         self.display.message('Training time\nCome back in 10')
         sleep(3)
 
-        # Now, save off the temp every 5 seconds for 10 minutes
-        for t in np.arange(0, 5*60*10+5, 5):
+        # Now, save off the temp every 5 seconds for 12 minutes
+        self.burner_front.value = 0.0
+        self.burner_front.value = 0.0
+        for t in np.arange(0, 60/5*2, 5):
+            self.display_status()
+            sleep(5)
 
-            # Display status will check the temperature and in doing so, will save the temperature into the database
+        self.burner_front.value = 0.2
+        self.burner_front.value = 0.2
+        for t in np.arange(0, 60/5*2, 5):
+            self.display_status()
+            sleep(5)
+
+        self.burner_front.value = 0.4
+        self.burner_front.value = 0.4
+        for t in np.arange(0, 60/5*2, 5):
+            self.display_status()
+            sleep(5)
+
+        self.burner_front.value = 0.6
+        self.burner_front.value = 0.6
+        for t in np.arange(0, 60/5*2, 5):
+            self.display_status()
+            sleep(5)
+
+        self.burner_front.value = 0.8
+        self.burner_front.value = 0.8
+        for t in np.arange(0, 60/5*2, 5):
+            self.display_status()
+            sleep(5)
+
+        self.burner_front.value = 1.0
+        self.burner_front.value = 1.0
+        for t in np.arange(0, 60/5*2, 5):
             self.display_status()
             sleep(5)
 
