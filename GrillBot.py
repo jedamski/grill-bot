@@ -1,9 +1,14 @@
+import adafruit_character_lcd.character_lcd as characterlcd
 from adafruit_motorkit import MotorKit
 from adafruit_motor import stepper
 from time import sleep
+import adafruit_max31855
+import digitalio
 import datetime
 import logging
 import atexit
+import busio
+import board
 import uuid
 
 
@@ -175,7 +180,7 @@ class Thermocouple(object):
         """
         This class acts as an interface for the max31855 board and Thermocouple
         mounted in the grill. The class returns temperature readings in
-        Fahrenheit and logs all requests in the MongoDB database.
+        Fahrenheit.
         """
 
         try:
@@ -191,8 +196,10 @@ class Thermocouple(object):
     @property
     def temperature(self):
         """
-        This function returns a floating point number when asked. Once it
-        retrieves the value, it will store it in the MongoDB database.
+        This function returns a floating point number when asked. If it is
+        unable to take a reading, it will return a nan. The calling function
+        should be prepared to handle cases where the Pi can't talk to the
+        thermocouple amplifier.
         """
 
         try:
@@ -206,9 +213,9 @@ class Thermocouple(object):
 
 class Display(object):
 
-    def __init__(self, startup_message='  Hello World!  \n  I''m GrillBot'):
+    def __init__(self, startup_message='  Hello World!\n'):
 
-        # Define the geometry of the display
+        # Define the geometry of the display, the class will limit incoming message accordingly
         self.columns = 16
         self.rows = 2
 
@@ -220,7 +227,7 @@ class Display(object):
         lcd_d6 = digitalio.DigitalInOut(board.D23)
         lcd_d7 = digitalio.DigitalInOut(board.D18)
 
-        # Initialise the lcd class from adafruit
+        # Initialise the lcd class using a package provided by adafruit
         self.lcd = characterlcd.Character_LCD_Mono(lcd_rs, lcd_en, lcd_d4, lcd_d5, lcd_d6, lcd_d7, lcd_columns, lcd_rows)
 
         # Wipe the LCD screen before we start
@@ -231,37 +238,56 @@ class Display(object):
         sleep(1.0)
 
     def message(message):
+        """
+        This function takes in a string and ensures the message meets all
+        requirements of the given LCD. The message should use \n special
+        characters for line breaks and should not include a trailing \n. If a
+        None is supplied instead, the lcd will be cleared.
+        """
 
-        # Need to confirm message is less than 2x16 characters
-        lines = message.split('\n')
+        # This function only works with string inputs and None, anything else throws an error
+        if type(message) == str:
 
-        if len(lines) > self.rows:
-            raise ValueError('Message has two many rows ({:})'.format(len(lines)))
+            # Split the string up into the rows, message shouldn't have a trailing end line
+            lines = message.split('\n')
 
-        # Loop through and confirm the message meets the specific LCD requirements
-        for ind, line in enumerate(lines):
-            if len(line > self.columns):
-                raise ValueError('Line {:} of the message has two many columns ({:})'.format(ind+1, len(line)))
-            else:
+            # The incoming message shouldn't exceed the number of available rows on the LCD display
+            if len(lines) > self.rows:
+                raise ValueError('Message has two many rows ({:})'.format(len(lines)))
 
-                # If the line is short enough, append to the final message
-                if ind == 0:
-                    message_out = line
+            # Loop through and confirm the message meets the specific LCD requirements
+            for ind, line in enumerate(lines):
+                if len(line > self.columns):
+                    raise ValueError('Line {:} of the message has two many columns ({:})'.format(ind+1, len(line)))
                 else:
-                    message_out = '\n' + line
+                    # If the line is short enough, append to the final message
+                    if ind == 0:
+                        message_out = line
+                    else:
+                        message_out = '\n' + line
 
-        # Now send the reconstructed message to the lcd display
-        self.lcd.message = message_out
+            # Now send the reconstructed message to the lcd display
+            self.lcd.message = message_out
+
+        elif message is None:
+            # If message is equal to None, just clear the lcd and move on
+            self.lcd.clear()
+
+        else:
+            # If anything but a string is supplied, notify the user
+            raise ValueError('Display.message expects a string input')
 
 class GrillDisplay(Display):
 
-    def __init__(self, startup_message=None):
+    def __init__(self, startup_message='  Hello World!  \n  I''m GrillBot'):
+        """
+        This class is very similar to the Display class, but it can work with
+        thermocouple and burner data to present some Grill specific messages.
+        This class relies on the message filtering from the basic Display class.
+        """
 
         # Pass in the GrillBot specific startup message to the display class
-        if startup_message is None:
-            super().__init__(startup_message='  Hello World!  \n  I''m GrillBot')
-        else:
-            super().__init__()
+        super().__init__(startup_message)
 
     def display_status(self, input_front, input_back, temperature, amb_temperature):
 
@@ -279,7 +305,7 @@ class GrillDisplay(Display):
 
         # Update the LCD message based on the current temp and burner inputs
         message = 'Temp: {:3.0f} / {:3.0f}\nF: '.format(temperature, amb_temperature) + input_front_str + ' / B: ' + input_back_str
-        self.message = message
+        self.message(message)
 
 class GrillDatabase(object):
 
