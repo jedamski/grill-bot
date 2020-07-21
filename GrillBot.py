@@ -211,6 +211,39 @@ class Thermocouple(object):
 
         return temperature_F
 
+class SimulatedThermocouple(Thermocouple):
+
+    def __init__(self, front_burner, back_burner):
+
+        # dT/dt = a*(T - Tamb) + b*u(t) + c
+        self.a = -0.00425
+        self.b = 1.299
+        self.c = 0.557
+        self.Tamb = 70.0
+        self.current_temp = self.Tamb
+
+        # Grab the current time so we can track the grill temperature behaviour
+        self.current_time = datetime.datetime.now()
+
+        # Call the parent class to initialize the base Thermocouple class
+        super().__init__()
+
+    @property
+    def temperature(self):
+
+        # Calculate the time since the last iteration and update the current timestamp
+        t_last = self.current_time
+        t_now = datetime.datetime.now()
+        dt = t_now - t_last
+        self.current_time = t_now
+
+        # Calculate the current temperature
+        dTdt = self.a*(self.current_temp - self.Tamb) + self.b*(self.front_burner.value/2 + self.back_burner/2) + self.c
+        temperature_F = self.current_temp + dTdt*dt
+        self.current_temp = temperature_F
+
+        return temperature_F
+
 class Display(object):
 
     def __init__(self, startup_message='  Hello World!\n'):
@@ -234,7 +267,7 @@ class Display(object):
         self.lcd.clear()
 
         # Add a welcome message for the user and sleep for at least 1 second
-        self.lcd.message(startup_message)
+        self.message(startup_message)
         sleep(1.0)
 
     def message(message):
@@ -268,6 +301,7 @@ class Display(object):
 
             # Now send the reconstructed message to the lcd display
             self.lcd.message = message_out
+            print(message_out)
 
         elif message is None:
             # If message is equal to None, just clear the lcd and move on
@@ -333,14 +367,17 @@ class GrillDatabase(object):
 
     def add_entry(temperature, set_temperature, front_burner, back_burner):
 
-        db.__sessions.find_one_and_update({'_session_id': self.session_id},
-                                          {'$push': {'time': new Timestamp(),
-                                                     'temperature': temperature,
-                                                     'front_burner': front_burner.value,
-                                                     'back_burner': back_burner.value,
-                                                     'set_temperature': set_temperature}})
+        # First append a new entry onto the current session
+        update = self.__sessions.update_one({'_session_id': self.session_id},
+                                            {'$push': {'time': new Timestamp(),
+                                                       'temperature': temperature,
+                                                       'front_burner': front_burner.value,
+                                                       'back_burner': back_burner.value,
+                                                       'set_temperature': set_temperature}})
 
-        # TODO: Add code for the case where it can't find the entry
+        # Handle the case where nothing was changed in the database
+        if update.matched_count != 1:
+            raise ValueError('Could not find the current session in the database')
 
     def load_model_parameters(self):
         # Assumed physical model
@@ -379,13 +416,13 @@ class GrillBot(object):
         # Create the grill display so that it's ready for the burner object creation
         self.display = GrillDisplay()
 
-        # Create the thermocouple object and take an ambient reading before doing anything
-        self.thermocouple = Thermocouple()
-        self.weather = Weather()
-
         # Define objects for both the front and back burners
         self.burner_back  = Burner(MotorKit.stepper1, step='single', display=self.display)
         self.burner_front = Burner(MotorKit.stepper2, step='single', display=self.display)
+
+        # Create the thermocouple object and take an ambient reading before doing anything
+        self.thermocouple = SimulatedThermocouple(self.burner_front, self.burner_back)
+        self.weather = Weather()
 
         # Now that all hardware interfaces are established, print current status
         self.display_status()
@@ -400,10 +437,6 @@ class GrillBot(object):
         self.database.add_entry(temperature, temperature_amb, self.set_temperature, self.front_burner, self.back_burner)
         self.display.display_status(self.burner_front, self.burner_back, temperature, temperature_amb)
 
-    def load_data(self):
-
-        pass
-
     def train(self):
 
         # First, let's set both of the burners to full power
@@ -411,7 +444,7 @@ class GrillBot(object):
         self.burner_front.value = 1.0
 
         # Alert the user before logging all of the data
-        self.display.message('Training time\nCome back in 10')
+        self.display.message('Training time\nCome back in 12')
         sleep(3)
 
         # Now, save off the temp every 5 seconds for 12 minutes
@@ -452,4 +485,7 @@ class GrillBot(object):
             sleep(5)
 
         # Grab all of the data that has been logged so far in this session
-        time, temp, input = self.load_data()
+        time, temp, input = self.database.load_data()
+
+        # Model form: dT/dt = a*(T - Tamb) + b*u(t) + c
+        self.database.save_model_parameters(a, b, c)
