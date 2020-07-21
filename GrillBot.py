@@ -246,25 +246,27 @@ class SimulatedThermocouple(Thermocouple):
 
 class Display(object):
 
-    def __init__(self, startup_message='  Hello World!\n'):
+    def __init__(self, startup_message='  Hello World!\n', debug=True):
 
         # Define the geometry of the display, the class will limit incoming message accordingly
         self.columns = 16
         self.rows = 2
 
-        # Define which pins are used for the display
-        lcd_rs = digitalio.DigitalInOut(board.D22)
-        lcd_en = digitalio.DigitalInOut(board.D17)
-        lcd_d4 = digitalio.DigitalInOut(board.D25)
-        lcd_d5 = digitalio.DigitalInOut(board.D24)
-        lcd_d6 = digitalio.DigitalInOut(board.D23)
-        lcd_d7 = digitalio.DigitalInOut(board.D18)
+        self.debug = debug
+        if self.debug == False:
+            # Define which pins are used for the display
+            lcd_rs = digitalio.DigitalInOut(board.D22)
+            lcd_en = digitalio.DigitalInOut(board.D17)
+            lcd_d4 = digitalio.DigitalInOut(board.D25)
+            lcd_d5 = digitalio.DigitalInOut(board.D24)
+            lcd_d6 = digitalio.DigitalInOut(board.D23)
+            lcd_d7 = digitalio.DigitalInOut(board.D18)
 
-        # Initialise the lcd class using a package provided by adafruit
-        self.lcd = characterlcd.Character_LCD_Mono(lcd_rs, lcd_en, lcd_d4, lcd_d5, lcd_d6, lcd_d7, lcd_columns, lcd_rows)
+            # Initialise the lcd class using a package provided by adafruit
+            self.lcd = characterlcd.Character_LCD_Mono(lcd_rs, lcd_en, lcd_d4, lcd_d5, lcd_d6, lcd_d7, lcd_columns, lcd_rows)
 
-        # Wipe the LCD screen before we start
-        self.lcd.clear()
+            # Wipe the LCD screen before we start
+            self.lcd.clear()
 
         # Add a welcome message for the user and sleep for at least 1 second
         self.message(startup_message)
@@ -295,17 +297,20 @@ class Display(object):
                 else:
                     # If the line is short enough, append to the final message
                     if ind == 0:
-                        message_out = line
+                        message_out = line.rjust(self.columns)
                     else:
-                        message_out = '\n' + line
+                        message_out = '\n' + line.rjust(self.columns)
 
             # Now send the reconstructed message to the lcd display
-            self.lcd.message = message_out
-            print(message_out)
+            if self.debug == False:
+                self.lcd.message = message_out
+            else:
+                print(message_out.replace('\n', ' --- '))
 
         elif message is None:
             # If message is equal to None, just clear the lcd and move on
-            self.lcd.clear()
+            if self.debug == False:
+                self.lcd.clear()
 
         else:
             # If anything but a string is supplied, notify the user
