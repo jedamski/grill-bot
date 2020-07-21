@@ -1,0 +1,4 @@
+adafruit-circuitpython-max31855==3.2.3
+adafruit-circuitpython-motorkit==1.5.2
+adafruit-circuitpython-charlcd==3.3.2
+pymongo==3.10.1
