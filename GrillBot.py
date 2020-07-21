@@ -12,7 +12,7 @@ import board
 import uuid
 
 
-class Burner(stepper):
+class Burner(object):
 
     def __init__(self, position, stepper_object, step='single'):
         """
@@ -149,15 +149,15 @@ class Burner(stepper):
         self.value = 1.5
 
         # Have the user press the knob down, to bypass the physical stop
-        self.display.message('Press ' + self.position '\nburner down... 5')
+        self.display.message('Press ' + self.position + '\nburner down... 5')
         sleep(1.0)
-        self.display.message('Press ' + self.position '\nburner down... 4')
+        self.display.message('Press ' + self.position + '\nburner down... 4')
         sleep(1.0)
-        self.display.message('Press ' + self.position '\nburner down... 3')
+        self.display.message('Press ' + self.position + '\nburner down... 3')
         sleep(1.0)
-        self.display.message('Press ' + self.position '\nburner down... 2')
+        self.display.message('Press ' + self.position + '\nburner down... 2')
         sleep(1.0)
-        self.display.message('Press ' + self.position '\nburner down... 1')
+        self.display.message('Press ' + self.position + '\nburner down... 1')
         sleep(1.0)
 
         # First, move the burner to the ignite position
@@ -165,13 +165,13 @@ class Burner(stepper):
         self.value = 1.0
 
         # Tell the user to press the ignite button
-        self.display.message("Press ignite\nbutton... 3")
+        self.display.message('Press ignite\nbutton... 3')
         sleep(1.0)
-        self.display.message("Press ignite\nbutton... 2")
+        self.display.message('Press ignite\nbutton... 2')
         sleep(1.0)
-        self.display.message("Press ignite\nbutton... 1")
+        self.display.message('Press ignite\nbutton... 1')
         sleep(1.0)
-        self.display.message("Good job!")
+        self.display.message('Good job!')
         sleep(2.0)
 
 class Thermocouple(object):
@@ -369,7 +369,7 @@ class GrillDatabase(object):
 
         # First append a new entry onto the current session
         update = self.__sessions.update_one({'_session_id': self.session_id},
-                                            {'$push': {'time': new Timestamp(),
+                                            {'$push': {'time': datetime.datetime.now(),
                                                        'temperature': temperature,
                                                        'front_burner': front_burner.value,
                                                        'back_burner': back_burner.value,
