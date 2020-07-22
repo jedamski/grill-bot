@@ -2,14 +2,16 @@ import adafruit_character_lcd.character_lcd as characterlcd
 from adafruit_motorkit import MotorKit
 from adafruit_motor import stepper
 from time import sleep
+from uuid import uuid4
+import numpy as np
 import adafruit_max31855
 import digitalio
 import datetime
 import logging
+import pymongo
 import atexit
 import busio
 import board
-import uuid
 
 
 class Burner(object):
@@ -272,7 +274,7 @@ class Display(object):
         self.message(startup_message)
         sleep(1.0)
 
-    def message(message):
+    def message(self, message):
         """
         This function takes in a string and ensures the message meets all
         requirements of the given LCD. The message should use \n special
@@ -292,14 +294,14 @@ class Display(object):
 
             # Loop through and confirm the message meets the specific LCD requirements
             for ind, line in enumerate(lines):
-                if len(line > self.columns):
+                if len(line) > self.columns:
                     raise ValueError('Line {:} of the message has two many columns ({:})'.format(ind+1, len(line)))
                 else:
                     # If the line is short enough, append to the final message
                     if ind == 0:
                         message_out = line.rjust(self.columns)
                     else:
-                        message_out = '\n' + line.rjust(self.columns)
+                        message_out += '\n' + line.rjust(self.columns)
 
             # Now send the reconstructed message to the lcd display
             if self.debug == False:
@@ -348,7 +350,7 @@ class GrillDisplay(Display):
 
 class GrillDatabase(object):
 
-    def __init__(self, URI='mongodb://localhost:27017', verbose=session):
+    def __init__(self, URI='mongodb://localhost:27017'):
         """
         This manages all data storage needs for the grill, including temperature
         data, weather information, model training data, and model coefficients
@@ -359,16 +361,17 @@ class GrillDatabase(object):
         self.__client = pymongo.MongoClient('mongodb://localhost:27017')
 
         # Define a unique session id and create a session for it
-        self.session_id = uuid4()
-        self.__sessions = self.__client.sessions
-        self.__sessions[self.session_id]
+        self.session_id = str(uuid4())
+        sessions = self.__client['sessions']
+        self.__this_session = sessions[self.session_id]
+        self.__model = self.__client['model']
 
         # Initialize the empty arrays
-        self.__sessions[self.session_id]['time']            = np.array([], dtype=datetime)
-        self.__sessions[self.session_id]['temperature']     = np.array([], dtype=float)
-        self.__sessions[self.session_id]['front_burner']    = np.array([], dtype=float)
-        self.__sessions[self.session_id]['back_burner']     = np.array([], dtype=float)
-        self.__sessions[self.session_id]['set_temperature'] = np.array([], dtype=float)
+        #self.__this_session['time']            = np.array([], dtype='datetime64')
+        #self.__this_session['temperature']     = np.array([], dtype=float)
+        #self.__this_session['front_burner']    = np.array([], dtype=float)
+        #self.__this_session['back_burner']     = np.array([], dtype=float)
+        #self.__this_session['set_temperature'] = np.array([], dtype=float)
 
     def add_entry(temperature, set_temperature, front_burner, back_burner):
 
@@ -494,3 +497,6 @@ class GrillBot(object):
 
         # Model form: dT/dt = a*(T - Tamb) + b*u(t) + c
         self.database.save_model_parameters(a, b, c)
+
+if __name__ == '__main__':
+    grill = GrillBot()
