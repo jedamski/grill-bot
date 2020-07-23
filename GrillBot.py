@@ -16,7 +16,7 @@ import board
 
 class Burner(object):
 
-    def __init__(self, position, stepper_object, step='single'):
+    def __init__(self, position=None, stepper_object=None, step='single', display=None):
         """
         This class handles the grill controller abstraction. The user can treat
         this object as just a scalar variable and the class manages the details
@@ -45,12 +45,16 @@ class Burner(object):
                             *** ### ### ***
         """
 
-        # Before we do anything, define the cleanup function. Turn the burner off when the program closes
-        atexit.register(cleanup)
+
+        # We always assume the grill starts out in the off position
+        self.__value = None
+
+        # Before we do anything else, define the cleanup function. Turn the burner off when the program closes
+        atexit.register(self.cleanup)
 
         # Specify the increments for the gearing, burner sector angle is the degrees corresponding to 1 unit on the burner set point scale
-        burner_sector_angle = 180.0
-        motor_increment = 1.8
+        self.burner_sector_angle = 180.0
+        self.stepper_angle = 1.8
 
         # Define the mechanical configuration for the hardware gearing
         tooth_count_sec = 9.0
@@ -58,28 +62,27 @@ class Burner(object):
         self.gear_ratio = tooth_count_sec/tooth_count_pri
 
         # This descriptor is a positional descriptor for the user
-        self.position = postion
+        self.position = position
+        self.display = display
 
         # Get the specific stepper increment, stepper motor can manage three types
         if step == 'single':
-            self.burner_increment = motor_increment
+            self.min_burner_increment = self.stepper_angle*self.gear_ratio
             self.stepper_step = step
             self.stepper_increment = stepper.SINGLE
         elif step == 'double':
-            self.burner_increment = 2*motor_increment
+            self.min_burner_increment = self.stepper_angle*2.0**self.gear_ratio
             self.stepper_step = step
-            self.stepper_increment = stepper.SINGLE
+            self.stepper_increment = stepper.DOUBLE
         elif step == 'half':
-            self.burner_increment = motor_increment/2.0
+            self.min_burner_increment = self.stepper_angle/2.0*self.gear_ratio
             self.stepper_step = step
             self.stepper_increment = stepper.INTERLEAVE
+        else:
+            raise ValueError('Unrecognized stepper step')
 
         # Calculate minimum burner increment in degrees allowable with current configuration
-        self.min_burner_increment = self.stepper_increment*tooth_count_sec/tooth_count_pri
         self.stepper = stepper_object
-
-        # We always assume the grill starts out in the off position
-        self.__value = 1.5
 
         # Alright, time to start the grill
         self.ignite()
@@ -93,36 +96,38 @@ class Burner(object):
     def value(self, value):
 
         # Check if we need to execute the ignition sequence
-        if self.value is None:
+        if self.value == None:
             if value is not None:
                 self.ignite()
 
         # Limit input value to range of allowable inputs
         if value is None:
-            logger.warning('Value set to None, turning the burner off')
+            pass #logger.warning('Value set to None, turning the burner off')
+            value = 1.5
         elif value > 1.0:
-            logger.warning('Value greater than 1.0 ({:1.2f}), turning the burner off'.format(value))
+            pass #logger.warning('Value greater than 1.0 ({:1.2f}), turning the burner off'.format(value))
             value = 1.5
         elif value < 0.0:
-            logger.warning('Value less than 0.0 ({:1.2f}), limiting value to 0.0'.format(value))
+            pass #logger.warning('Value less than 0.0 ({:1.2f}), limiting value to 0.0'.format(value))
             value = 0.0
 
         # Calculate the number of steps required to move
-        num_steps = np.floor(np.abs((value - self.value)*self.burner_sector_angle/self.burner_increment))
+        num_steps = int(np.floor(np.abs((value - self.value)*self.burner_sector_angle/self.min_burner_increment)))
 
         # Determine direction and number of steps required to reach set point
         if value > self.value:
             direction = stepper.FORWARD
-            new_value = self.value + num_steps*self.burner_increment/self.burner_sector_angle
+            new_value = self.value + num_steps*self.min_burner_increment/self.burner_sector_angle
         elif self.value < self.value:
             direction = stepper.BACKWARD
-            new_value = self.value - num_steps*self.burner_increment/self.burner_sector_angle
+            new_value = self.value - num_steps*self.min_burner_increment/self.burner_sector_angle
         else:
             new_value = value
 
         # Move the motor the calculated number of steps
-        for i in range(0, num_steps):
+        for i in range(0, int(num_steps)):
             self.stepper.onestep(direction=stepper, style=self.stepper_increment)
+            sleep(0.01)
 
         # After the motor has successfully moved, update the value
         if new_value == 1.5:
@@ -148,7 +153,7 @@ class Burner(object):
         """
 
         # self.__value should be set to None, change to 1.5
-        self.value = 1.5
+        self.__value = 1.5
 
         # Have the user press the knob down, to bypass the physical stop
         self.display.message('Press ' + self.position + '\nburner down... 5')
@@ -163,10 +168,11 @@ class Burner(object):
         sleep(1.0)
 
         # First, move the burner to the ignite position
-        self.display.message('Good job, you can\nlet go now')
+        self.display.message('Good job...\nlet go now')
         self.value = 1.0
 
         # Tell the user to press the ignite button
+        sleep(2.0)
         self.display.message('Press ignite\nbutton... 3')
         sleep(1.0)
         self.display.message('Press ignite\nbutton... 2')
@@ -221,11 +227,15 @@ class SimulatedThermocouple(Thermocouple):
         self.a = -0.00425
         self.b = 1.299
         self.c = 0.557
-        self.Tamb = 70.0
+        self.Tamb = 72.0
         self.current_temp = self.Tamb
 
         # Grab the current time so we can track the grill temperature behaviour
         self.current_time = datetime.datetime.now()
+
+        # Save off the burner objects
+        self.front_burner = front_burner
+        self.back_burner = back_burner
 
         # Call the parent class to initialize the base Thermocouple class
         super().__init__()
@@ -240,8 +250,8 @@ class SimulatedThermocouple(Thermocouple):
         self.current_time = t_now
 
         # Calculate the current temperature
-        dTdt = self.a*(self.current_temp - self.Tamb) + self.b*(self.front_burner.value/2 + self.back_burner/2) + self.c
-        temperature_F = self.current_temp + dTdt*dt
+        dTdt = self.a*(self.current_temp - self.Tamb) + self.b*(self.front_burner.value/2.0 + self.back_burner.value/2.0) + self.c
+        temperature_F = self.current_temp + dTdt*dt.total_seconds()
         self.current_temp = temperature_F
 
         return temperature_F
@@ -251,7 +261,7 @@ class Display(object):
     def __init__(self, startup_message='  Hello World!\n', debug=True):
 
         # Define the geometry of the display, the class will limit incoming message accordingly
-        self.columns = 16
+        self.columns = 16+6
         self.rows = 2
 
         self.debug = debug
@@ -299,15 +309,15 @@ class Display(object):
                 else:
                     # If the line is short enough, append to the final message
                     if ind == 0:
-                        message_out = line.rjust(self.columns)
+                        message_out = line.ljust(self.columns)
                     else:
-                        message_out += '\n' + line.rjust(self.columns)
+                        message_out += '\n' + line.ljust(self.columns)
 
             # Now send the reconstructed message to the lcd display
             if self.debug == False:
                 self.lcd.message = message_out
             else:
-                print(message_out.replace('\n', ' --- '))
+                print('| ' + message_out.replace('\n', ' | ') + ' |')
 
         elif message is None:
             # If message is equal to None, just clear the lcd and move on
@@ -345,7 +355,7 @@ class GrillDisplay(Display):
             input_back_str = '{:2.0f}%'.format(input_back.value*100)
 
         # Update the LCD message based on the current temp and burner inputs
-        message = 'Temp: {:3.0f} / {:3.0f}\nF: '.format(temperature, amb_temperature) + input_front_str + ' / B: ' + input_back_str
+        message = 'Temp: {:3.1f}F / {:3.1f}F\nF: '.format(temperature, amb_temperature) + input_front_str + ' / B: ' + input_back_str
         self.message(message)
 
 class GrillDatabase(object):
@@ -409,7 +419,7 @@ class GrillDatabase(object):
 class Weather(object):
 
     def __init__(self):
-        pass
+        self.temperature = 72.0
 
 class GrillBot(object):
 
@@ -425,8 +435,9 @@ class GrillBot(object):
         self.display = GrillDisplay()
 
         # Define objects for both the front and back burners
-        self.burner_back  = Burner(MotorKit.stepper1, step='single', display=self.display)
-        self.burner_front = Burner(MotorKit.stepper2, step='single', display=self.display)
+        kit = MotorKit()
+        self.burner_back  = Burner(position='back',  stepper_object=kit.stepper1, step='single', display=self.display)
+        self.burner_front = Burner(position='front', stepper_object=kit.stepper2, step='single', display=self.display)
 
         # Create the thermocouple object and take an ambient reading before doing anything
         self.thermocouple = SimulatedThermocouple(self.burner_front, self.burner_back)
@@ -442,13 +453,13 @@ class GrillBot(object):
         temperature_amb = self.weather.temperature
 
         # Display the current status to the user
-        self.database.add_entry(temperature, temperature_amb, self.set_temperature, self.front_burner, self.back_burner)
+        #self.database.add_entry(temperature, temperature_amb, self.set_temperature, self.front_burner, self.back_burner)
         self.display.display_status(self.burner_front, self.burner_back, temperature, temperature_amb)
 
     def train(self):
 
         # First, let's set both of the burners to full power
-        self.burner_front.value = 1.0
+        self.burner_back.value = 1.0
         self.burner_front.value = 1.0
 
         # Alert the user before logging all of the data
@@ -456,39 +467,39 @@ class GrillBot(object):
         sleep(3)
 
         # Now, save off the temp every 5 seconds for 12 minutes
+        self.burner_back.value = 0.0
         self.burner_front.value = 0.0
-        self.burner_front.value = 0.0
-        for t in np.arange(0, 60/5*2, 5):
+        for t in np.arange(0, 60*2, 5):
             self.display_status()
             sleep(5)
 
+        self.burner_back.value = 0.2
         self.burner_front.value = 0.2
-        self.burner_front.value = 0.2
-        for t in np.arange(0, 60/5*2, 5):
+        for t in np.arange(0, 60*2, 5):
             self.display_status()
             sleep(5)
 
+        self.burner_back.value = 0.4
         self.burner_front.value = 0.4
-        self.burner_front.value = 0.4
-        for t in np.arange(0, 60/5*2, 5):
+        for t in np.arange(0, 60*2, 5):
             self.display_status()
             sleep(5)
 
+        self.burner_back.value = 0.6
         self.burner_front.value = 0.6
-        self.burner_front.value = 0.6
-        for t in np.arange(0, 60/5*2, 5):
+        for t in np.arange(0, 60*2, 5):
             self.display_status()
             sleep(5)
 
+        self.burner_back.value = 0.8
         self.burner_front.value = 0.8
-        self.burner_front.value = 0.8
-        for t in np.arange(0, 60/5*2, 5):
+        for t in np.arange(0, 60*2, 5):
             self.display_status()
             sleep(5)
 
+        self.burner_back.value = 1.0
         self.burner_front.value = 1.0
-        self.burner_front.value = 1.0
-        for t in np.arange(0, 60/5*2, 5):
+        for t in np.arange(0, 60*2, 5):
             self.display_status()
             sleep(5)
 
@@ -500,3 +511,4 @@ class GrillBot(object):
 
 if __name__ == '__main__':
     grill = GrillBot()
+    grill.train()
