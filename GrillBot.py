@@ -127,7 +127,7 @@ class Burner(object):
         # Move the motor the calculated number of steps
         for i in range(0, int(num_steps)):
             self.stepper.onestep(direction=stepper, style=self.stepper_increment)
-            sleep(0.01)
+            sleep(0.001)
 
         # After the motor has successfully moved, update the value
         if new_value == 1.5:
@@ -379,7 +379,7 @@ class GrillDatabase(object):
         self.session_id = inserted_document.inserted_id
 
 
-        self.__model = self.__client['model']
+        #self.__model = self.__client['model']
 
         # Initialize the empty arrays
         #self.__this_session['time']            = np.array([], dtype='datetime64')
@@ -441,8 +441,8 @@ class GrillBot(object):
 
         # Define objects for both the front and back burners
         kit = MotorKit()
-        self.burner_back  = Burner(position='back',  stepper_object=kit.stepper1, step='single', display=self.display)
-        self.burner_front = Burner(position='front', stepper_object=kit.stepper2, step='single', display=self.display)
+        self.burner_back  = Burner(position='back',  stepper_object=kit.stepper1, step='half', display=self.display)
+        self.burner_front = Burner(position='front', stepper_object=kit.stepper2, step='half', display=self.display)
 
         # Create the thermocouple object and take an ambient reading before doing anything
         self.thermocouple = SimulatedThermocouple(self.burner_front, self.burner_back)
