@@ -368,12 +368,17 @@ class GrillDatabase(object):
         """
 
         # Initialize the client and  connect to the ingredients collection
-        self.__client = pymongo.MongoClient('mongodb://localhost:27017')
+        self.client = pymongo.MongoClient('mongodb://localhost:27017')
 
-        # Define a unique session id and create a session for it
-        self.session_id = str(uuid4())
-        sessions = self.__client['sessions']
-        self.__this_session = sessions[self.session_id]
+        # Setup the database and collections
+        self.grill_database = self.client.grill_database
+        self.sessions = self.grill_database.sessions
+
+        # Initialize an empty database document for this session
+        inserted_document = self.sessions.insert_one({'start_time': datetime.datetime.now(), 'time': [], 'temperature': [], 'front_burner': [], 'back_burner': [], 'set_temperature': []})
+        self.session_id = inserted_document.inserted_id
+
+
         self.__model = self.__client['model']
 
         # Initialize the empty arrays
@@ -383,15 +388,15 @@ class GrillDatabase(object):
         #self.__this_session['back_burner']     = np.array([], dtype=float)
         #self.__this_session['set_temperature'] = np.array([], dtype=float)
 
-    def add_entry(temperature, set_temperature, front_burner, back_burner):
+    def add_entry(self, temperature, set_temperature, front_burner_value, back_burner_value):
 
         # First append a new entry onto the current session
-        update = self.__sessions.update_one({'_session_id': self.session_id},
-                                            {'$push': {'time': datetime.datetime.now(),
-                                                       'temperature': temperature,
-                                                       'front_burner': front_burner.value,
-                                                       'back_burner': back_burner.value,
-                                                       'set_temperature': set_temperature}})
+        update = self.sessions.update_one({'_id': self.session_id},
+                                                {'$push': {'time': datetime.datetime.now(),
+                                                           'temperature': temperature,
+                                                           'front_burner': front_burner_value,
+                                                           'back_burner': back_burner_value,
+                                                           'set_temperature': set_temperature}})
 
         # Handle the case where nothing was changed in the database
         if update.matched_count != 1:
