@@ -360,7 +360,7 @@ class GrillDisplay(Display):
 
 class GrillDatabase(object):
 
-    def __init__(self, URI='mongodb://localhost:27017'):
+    def __init__(self, URI='mongodb://localhost:27017', session=None):
         """
         This manages all data storage needs for the grill, including temperature
         data, weather information, model training data, and model coefficients
@@ -375,9 +375,16 @@ class GrillDatabase(object):
         self.sessions = self.grill_database.sessions
 
         # Initialize an empty database document for this session
-        inserted_document = self.sessions.insert_one({'start_time': datetime.datetime.now(), 'time': [], 'temperature': [], 'temperature_amb': [], 'front_burner': [], 'back_burner': [], 'set_temperature': []})
-        self.session_id = inserted_document.inserted_id
-
+        if session == None:
+            inserted_document = self.sessions.insert_one({'start_time': datetime.datetime.now(), 'time': [], 'temperature': [], 'temperature_amb': [], 'front_burner': [], 'back_burner': [], 'set_temperature': []})
+            self.session_id = inserted_document.inserted_id
+        else:
+            if type(session) == str:
+                self.session_id = ObjectId(session)
+            elif type(session) == ObjectId:
+                self.session_id = session
+            else:
+                raise ValueError('Unrecognized type passed for the database session id')
 
         #self.__model = self.__client['model']
 
@@ -413,6 +420,22 @@ class GrillDatabase(object):
 
         return a, b, c
 
+    def all_data(self):
+
+        # Download the data from the database, the data will be structured as a dictionary
+        data = database.sessions.find_one({'_id': ObjectId(database.session_id)})
+
+        # Now, convert the data to a pandas DataFrame
+        df = pd.DataFrame()
+        df['time']            = data['time']
+        df['temperature']     = data['temperature']
+        df['temperature_amb'] = data['temperature_amb']
+        df['front_burner']    = data['front_burner']
+        df['back_burner']     = data['back_burner']
+        df['set_temperature'] = data['set_temperature']
+
+        return df
+
     def save_model_parameters(self, a, b, c):
         # Assumed physical model
         # dT/dt = a*(T - Tamb) + b*u(t) + c
@@ -422,6 +445,7 @@ class GrillDatabase(object):
         self.__client.model['b'] = b
         self.__client.model['c'] = c
 
+
 class Weather(object):
 
     def __init__(self):
@@ -429,13 +453,12 @@ class Weather(object):
 
 class GrillBot(object):
 
-    def __init__(self):
+    def __init__(self, session_id=None):
         """
         """
 
         # Create a unique session id for the database
-        self.session_id = uuid4()
-        self.database = GrillDatabase()
+        self.database = GrillDatabase(session_id)
         self.set_temperature = None
 
         # Create the grill display so that it's ready for the burner object creation
@@ -517,5 +540,9 @@ class GrillBot(object):
         self.database.save_model_parameters(a, b, c)
 
 if __name__ == '__main__':
-    grill = GrillBot()
-    grill.train()
+    #grill = GrillBot("5f1bbe0474fece04add6d260")
+    #grill.train()
+
+    database = GrillDatabase(session='5f1bbe0474fece04add6d260')
+    data = database.sessions.find({"_id": database.session_id})
+    print(data)
