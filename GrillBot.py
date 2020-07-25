@@ -375,7 +375,7 @@ class GrillDatabase(object):
         self.sessions = self.grill_database.sessions
 
         # Initialize an empty database document for this session
-        inserted_document = self.sessions.insert_one({'start_time': datetime.datetime.now(), 'time': [], 'temperature': [], 'front_burner': [], 'back_burner': [], 'set_temperature': []})
+        inserted_document = self.sessions.insert_one({'start_time': datetime.datetime.now(), 'time': [], 'temperature': [], 'temperature_amb': [], 'front_burner': [], 'back_burner': [], 'set_temperature': []})
         self.session_id = inserted_document.inserted_id
 
 
@@ -388,14 +388,15 @@ class GrillDatabase(object):
         #self.__this_session['back_burner']     = np.array([], dtype=float)
         #self.__this_session['set_temperature'] = np.array([], dtype=float)
 
-    def add_entry(self, temperature, set_temperature, front_burner_value, back_burner_value):
+    def add_entry(self, temperature, temperature_amb, set_temperature, front_burner, back_burner):
 
         # First append a new entry onto the current session
         update = self.sessions.update_one({'_id': self.session_id},
                                                 {'$push': {'time': datetime.datetime.now(),
                                                            'temperature': temperature,
-                                                           'front_burner': front_burner_value,
-                                                           'back_burner': back_burner_value,
+                                                           'temperature_amb': temperature_amb,
+                                                           'front_burner': front_burner.value,
+                                                           'back_burner': back_burner.value,
                                                            'set_temperature': set_temperature}})
 
         # Handle the case where nothing was changed in the database
@@ -435,6 +436,7 @@ class GrillBot(object):
         # Create a unique session id for the database
         self.session_id = uuid4()
         self.database = GrillDatabase()
+        self.set_temperature = None
 
         # Create the grill display so that it's ready for the burner object creation
         self.display = GrillDisplay()
@@ -458,7 +460,7 @@ class GrillBot(object):
         temperature_amb = self.weather.temperature
 
         # Display the current status to the user
-        #self.database.add_entry(temperature, temperature_amb, self.set_temperature, self.front_burner, self.back_burner)
+        self.database.add_entry(temperature, temperature_amb, self.set_temperature, self.burner_front, self.burner_back)
         self.display.display_status(self.burner_front, self.burner_back, temperature, temperature_amb)
 
     def train(self):
