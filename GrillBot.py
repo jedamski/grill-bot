@@ -429,7 +429,7 @@ class GrillDatabase(object):
         df = pd.DataFrame()
         df['time']            = data['time']
         df['temperature']     = data['temperature']
-        df['temperature_amb'] = data['temperature_amb']
+        #df['temperature_amb'] = data['temperature_amb']
         df['front_burner']    = data['front_burner']
         df['back_burner']     = data['back_burner']
         df['set_temperature'] = data['set_temperature']
@@ -444,6 +444,52 @@ class GrillDatabase(object):
         self.__client.model['a'] = a
         self.__client.model['b'] = b
         self.__client.model['c'] = c
+
+    def integrate_model(self, time_normalized, c1, c2, c3):
+
+        # Grab the data from the current session, so we can train the model
+        data = self.all_data()
+
+        def myode(time, temp):
+            """
+            This function represents the general form of the grill thermodynamic
+            model. The grill is modeled as a single node model that has heat
+            addition through the c2*u term and heat convection to ambient
+            through the c1*(temp - temp_amb) term. The c3 term represents the
+            minimum heat addition when the grill is turned to low. The
+            parameters u is bounded from 0 to 1.
+            """
+
+            # Grab some other parameters that vary in the time domain
+            avg_burner = data['front_burner']/2.0 + data['back_burner']/2.0
+            u = np.interp(time, time_normalized, avg_burner)
+            temp_amb = 72.0 #np.interp(time, data['time'], data['temperature_amb'])
+
+            return c1*(temp - temp_amb) + c2*u + c3
+
+        # Integrate the initial value problem and pass the temp response back
+        temp = solve_ivp(fun=myode, t_span=(np.min(time_normalized), np.max(time_normalized)), t_eval=time_normalized, y0=[data['temperature'][0]])
+        #temp = odeint(myode, data['temperature'][0], time_normalized)
+
+        #return temp[:, 0]
+        return temp.y[0]
+
+    def build_model(self):
+
+        # dT/dt = a*(T - Tamb) + b*u(t) + c
+        time = [dt.total_seconds() for dt in data['time'] - data['time'][0]]
+        #print(len(time))
+        #print(len(data['temperature']))
+        k_fit, k_cov = curve_fit(self.integrate_model, time, data['temperature'], p0=[-0.01, 1.0, 0.5])
+        print(k_fit)
+        print(k_cov)
+
+        y = self.integrate_model(time, k_fit[0], k_fit[1], k_fit[2])
+        y2 = self.integrate_model(time, -0.00425, 1.229, 0.557)
+        plt.plot(time, data['temperature'], 'gs')
+        plt.plot(time, y, 'k-')
+        plt.plot(time, y2, 'k--')
+        plt.show()
 
 
 class Weather(object):
