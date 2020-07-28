@@ -4,6 +4,7 @@ from adafruit_motor import stepper
 from time import sleep
 from uuid import uuid4
 import numpy as np
+from bson.objectid import ObjectId
 import adafruit_max31855
 import digitalio
 import datetime
@@ -135,13 +136,11 @@ class Burner(object):
         else:
             self.__value = new_value
 
-        # Always release the motor. Limits torque, but reduces overheating
-        self.stepper.release()
-
     def cleanup(self):
 
         # The object is being deleted, turn the burner off
         self.value = None
+        self.stepper.release()
 
     def ignite(self):
         """
@@ -373,6 +372,7 @@ class GrillDatabase(object):
         # Setup the database and collections
         self.grill_database = self.client.grill_database
         self.sessions = self.grill_database.sessions
+        self.model = self.grill_database.model
 
         # Initialize an empty database document for this session
         if session == None:
@@ -467,7 +467,7 @@ class GrillDatabase(object):
 
             return c1*(temp - temp_amb) + c2*u + c3
 
-        # Integrate the initial value problem and pass the temp response back
+        # Integrate there initial value problem and pass the temp response back
         temp = solve_ivp(fun=myode, t_span=(np.min(time_normalized), np.max(time_normalized)), t_eval=time_normalized, y0=[data['temperature'][0]])
         #temp = odeint(myode, data['temperature'][0], time_normalized)
 
@@ -534,61 +534,65 @@ class GrillBot(object):
 
     def train(self):
 
-        # First, let's set both of the burners to full power
-        self.burner_back.value = 1.0
-        self.burner_front.value = 1.0
+        # Grab the data to see if the training set has already been generated
+        data = self.all_data()
 
-        # Alert the user before logging all of the data
-        self.display.message('Training time\nCome back in 12')
-        sleep(3)
+        if len(data) == 0:
 
-        # Now, save off the temp every 5 seconds for 12 minutes
-        self.burner_back.value = 0.0
-        self.burner_front.value = 0.0
-        for t in np.arange(0, 60*2, 5):
-            self.display_status()
-            sleep(5)
+            # First, let's set both of the burners to full power
+            self.burner_back.value = 1.0
+            self.burner_front.value = 1.0
 
-        self.burner_back.value = 0.2
-        self.burner_front.value = 0.2
-        for t in np.arange(0, 60*2, 5):
-            self.display_status()
-            sleep(5)
+            # Alert the user before logging all of the data
+            self.display.message('Training time\nCome back in 12')
+            sleep(3)
 
-        self.burner_back.value = 0.4
-        self.burner_front.value = 0.4
-        for t in np.arange(0, 60*2, 5):
-            self.display_status()
-            sleep(5)
+            # Now, save off the temp every 5 seconds for 12 minutes
+            self.burner_back.value = 0.0
+            self.burner_front.value = 0.0
+            for t in np.arange(0, 60*5, 2):
+                self.display_status()
+                sleep(2)
 
-        self.burner_back.value = 0.6
-        self.burner_front.value = 0.6
-        for t in np.arange(0, 60*2, 5):
-            self.display_status()
-            sleep(5)
+            value = 0.0
+            while value < 1:
+                value = value + 1.0/(60.0*5.0/2.0)
+                self.burner_front.value = np.minimum(1.0, value)
+                self.burner_back.value = np.minimum(1.0, value)
+                self.display_status()
+                sleep(2)
 
-        self.burner_back.value = 0.8
-        self.burner_front.value = 0.8
-        for t in np.arange(0, 60*2, 5):
-            self.display_status()
-            sleep(5)
-
-        self.burner_back.value = 1.0
-        self.burner_front.value = 1.0
-        for t in np.arange(0, 60*2, 5):
-            self.display_status()
-            sleep(5)
-
-        # Grab all of the data that has been logged so far in this session
-        time, temp, input = self.database.load_data()
+            self.burner_back.value = 1.0
+            self.burner_front.value = 1.0
+            for t in np.arange(0, 60*5, 2):
+                self.display_status()
+                sleep(2)
 
         # Model form: dT/dt = a*(T - Tamb) + b*u(t) + c
-        self.database.save_model_parameters(a, b, c)
+        self.database.build_model(a, b, c)
+
+    def build_model(self):
+
+        # Grab the data from the current run, only consider data above 100 deg F
+        data = self.all_data()
+        data = data[data['temperature'] > 100.0]
+        data = data.reset_index()
+
+        # Reference time such that it starts at zero
+        time = [dt.total_seconds() for dt in data['time'] - data['time'][0]]
+        k_fit, k_cov = curve_fit(self.integrate_model, time, data['temperature'], p0=[-0.01, 1.0, 0.5])
+
+        # Save the model parameters into the database
+        inserted_model = self.sessions.insert_one({'model_form': 'dT/dt = a*(T - Tamb) + b*u(t) + c',
+                                                   'a': k_fit[0],
+                                                   'b': k_fit[1],
+                                                   'c': k_fit[2]})
+
 
 if __name__ == '__main__':
-    #grill = GrillBot("5f1bbe0474fece04add6d260")
-    #grill.train()
+    grill = GrillBot("5f1bbe0474fece04add6d260")
+    grill.train()
 
-    database = GrillDatabase(session='5f1bbe0474fece04add6d260')
-    data = database.sessions.find({"_id": database.session_id})
-    print(data)
+    #database = GrillDatabase(URI='mongodb://10.0.1.17:27017', session='5f1bbe0474fece04add6d260')
+    #database.train()
+    #print(data)
