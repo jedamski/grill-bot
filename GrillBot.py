@@ -499,12 +499,12 @@ class Weather(object):
 
 class GrillBot(object):
 
-    def __init__(self, session_id=None):
+    def __init__(self, session_id=None, URI='mongodb://10.0.1.17:27017'):
         """
         """
 
         # Create a unique session id for the database
-        self.database = GrillDatabase(session_id)
+        self.database = GrillDatabase(session=session_id, URI=URI)
         self.set_temperature = None
 
         # Create the grill display so that it's ready for the burner object creation
@@ -512,8 +512,8 @@ class GrillBot(object):
 
         # Define objects for both the front and back burners
         kit = MotorKit()
-        self.burner_back  = Burner(position='back',  stepper_object=kit.stepper1, step='half', display=self.display)
-        self.burner_front = Burner(position='front', stepper_object=kit.stepper2, step='half', display=self.display)
+        self.burner_back  = Burner(position='back',  stepper_object=kit.stepper1, step='single', display=self.display)
+        self.burner_front = Burner(position='front', stepper_object=kit.stepper2, step='single', display=self.display)
 
         # Create the thermocouple object and take an ambient reading before doing anything
         self.thermocouple = SimulatedThermocouple(self.burner_front, self.burner_back)
@@ -590,7 +590,7 @@ class GrillBot(object):
 
 
 if __name__ == '__main__':
-    grill = GrillBot("5f1bbe0474fece04add6d260")
+    grill = GrillBot()
     grill.train()
 
     #database = GrillDatabase(URI='mongodb://10.0.1.17:27017', session='5f1bbe0474fece04add6d260')
