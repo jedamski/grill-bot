@@ -13,6 +13,7 @@ import pymongo
 import atexit
 import busio
 import board
+import pandas as pd
 
 
 class Burner(object):
@@ -135,6 +136,9 @@ class Burner(object):
             self.__value = None
         else:
             self.__value = new_value
+
+        # Now release the stepper to save power
+        self.stepper.release()
 
     def cleanup(self):
 
@@ -423,7 +427,7 @@ class GrillDatabase(object):
     def all_data(self):
 
         # Download the data from the database, the data will be structured as a dictionary
-        data = database.sessions.find_one({'_id': ObjectId(database.session_id)})
+        data = self.sessions.find_one({'_id': ObjectId(self.session_id)})
 
         # Now, convert the data to a pandas DataFrame
         df = pd.DataFrame()
@@ -535,7 +539,7 @@ class GrillBot(object):
     def train(self):
 
         # Grab the data to see if the training set has already been generated
-        data = self.all_data()
+        data = self.database.all_data()
 
         if len(data) == 0:
 
