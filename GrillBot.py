@@ -1,11 +1,14 @@
 import adafruit_character_lcd.character_lcd as characterlcd
 from adafruit_motorkit import MotorKit
+from scipy.optimize import curve_fit
 from adafruit_motor import stepper
+from bson.objectid import ObjectId
+from scipy.integrate import odeint
 from time import sleep
 from uuid import uuid4
-import numpy as np
-from bson.objectid import ObjectId
 import adafruit_max31855
+import pandas as pd
+import numpy as np
 import digitalio
 import datetime
 import logging
@@ -13,7 +16,6 @@ import pymongo
 import atexit
 import busio
 import board
-import pandas as pd
 
 
 class Burner(object):
@@ -83,7 +85,7 @@ class Burner(object):
         else:
             raise ValueError('Unrecognized stepper step')
 
-        # Calculate minimum burner increment in degrees allowable with current configuration
+        # Save the stepper object that we will control
         self.stepper = stepper_object
 
         # Alright, time to start the grill
@@ -129,7 +131,7 @@ class Burner(object):
         # Move the motor the calculated number of steps
         for i in range(0, int(num_steps)):
             self.stepper.onestep(direction=stepper, style=self.stepper_increment)
-            sleep(0.001)
+            sleep(0.01)
 
         # After the motor has successfully moved, update the value
         if new_value == 1.5:
@@ -141,6 +143,11 @@ class Burner(object):
         self.stepper.release()
 
     def cleanup(self):
+        """
+        When the code is closing, make sure the burner is turned off and stepper
+        is released so that it doesn't overheat. We don't want to present a
+        safety hazard!
+        """
 
         # The object is being deleted, turn the burner off
         self.value = None
@@ -264,7 +271,7 @@ class Display(object):
     def __init__(self, startup_message='  Hello World!\n', debug=True):
 
         # Define the geometry of the display, the class will limit incoming message accordingly
-        self.columns = 16+6
+        self.columns = 16
         self.rows = 2
 
         self.debug = debug
@@ -418,9 +425,9 @@ class GrillDatabase(object):
         # Assumed physical model
         # dT/dt = a*(T - Tamb) + b*u(t) + c
 
-        a = self.__client.model['a']
-        b = self.__client.model['b']
-        c = self.__client.model['c']
+        a = self.model['a']
+        b = self.model['b']
+        c = self.model['c']
 
         return a, b, c
 
@@ -480,26 +487,60 @@ class GrillDatabase(object):
 
     def build_model(self):
 
-        # dT/dt = a*(T - Tamb) + b*u(t) + c
+        # Grab the data from the current run, only consider data above 100 deg F
+        data = self.all_data()
+        data = data[data['temperature'] > 100.0]
+        data = data.reset_index()
+
+        # Reference time such that it starts at zero
         time = [dt.total_seconds() for dt in data['time'] - data['time'][0]]
-        #print(len(time))
-        #print(len(data['temperature']))
         k_fit, k_cov = curve_fit(self.integrate_model, time, data['temperature'], p0=[-0.01, 1.0, 0.5])
-        print(k_fit)
-        print(k_cov)
 
-        y = self.integrate_model(time, k_fit[0], k_fit[1], k_fit[2])
-        y2 = self.integrate_model(time, -0.00425, 1.229, 0.557)
-        plt.plot(time, data['temperature'], 'gs')
-        plt.plot(time, y, 'k-')
-        plt.plot(time, y2, 'k--')
-        plt.show()
-
+        # Save the model parameters into the database
+        inserted_model = self.model.insert_one({'model_form': 'dT/dt = a*(T - Tamb) + b*u(t) + c',
+                                                'a': k_fit[0],
+                                                'b': k_fit[1],
+                                                'c': k_fit[2]})
 
 class Weather(object):
 
     def __init__(self):
-        self.temperature = 72.0
+
+        # Define the parameters that are unique to me
+        self.url = 'https://api.darksky.net/forecast/'
+        self.secret_key = os.getenv('darksky_key')
+        self.latitude = os.getenv('latitude')
+        self.longitude = os.getenv('longitude')
+
+    def download_data(self, time=None):
+        """
+        Downloads the data from DarkSky API and returns a parsed dictionary from
+        the json data. This function is built to work with both current
+        conditions as well as looking up historical data.
+
+        time (optional): UNIX time stamp, seconds since midnight GMT on 1 Jan 1970
+        return: a dictionary based on the parsed json response
+        """
+
+        # Construct the request url, not currently asking for any fancy pance options
+        if time is None:
+            request_url = '{}{}/{},{}/'.format(self.url, self.secret_key, self.latitude, self.longitude)
+        else:
+            request_url = '{}{}/{},{},{:.0f}/'.format(self.url, self.secret_key, self.latitude, self.longitude, time)
+
+        # Send the API request to DarkSky
+        print('Weather: sending forecast request to the API - {}'.format(request_url))
+        resp = requests.get(request_url)
+
+        # If there is an error, throw an error
+        if resp.status_code != 200:
+            raise RuntimeError('GET /forecast/ {}'.format(resp.status_code))
+
+        # Otherwise, deconstruct the json response
+        resp_dict = resp.json()
+        rcParams['timezone'] = resp_dict['timezone']
+
+        return resp_dict
 
 class GrillBot(object):
 
@@ -522,9 +563,6 @@ class GrillBot(object):
         # Create the thermocouple object and take an ambient reading before doing anything
         self.thermocouple = SimulatedThermocouple(self.burner_front, self.burner_back)
         self.weather = Weather()
-
-        # Now that all hardware interfaces are established, print current status
-        self.display_status()
 
     def display_status(self):
 
@@ -554,47 +592,30 @@ class GrillBot(object):
             # Now, save off the temp every 5 seconds for 12 minutes
             self.burner_back.value = 0.0
             self.burner_front.value = 0.0
-            for t in np.arange(0, 60*5, 2):
+            for t in np.arange(0, 60*5, 1):
                 self.display_status()
-                sleep(2)
+                sleep(1)
 
             value = 0.0
             while value < 1:
-                value = value + 1.0/(60.0*5.0/2.0)
+                value = value + 1.0/(60.0*5.0)
                 self.burner_front.value = np.minimum(1.0, value)
                 self.burner_back.value = np.minimum(1.0, value)
                 self.display_status()
-                sleep(2)
+                sleep(1)
 
             self.burner_back.value = 1.0
             self.burner_front.value = 1.0
-            for t in np.arange(0, 60*5, 2):
+            for t in np.arange(0, 60*5, 1):
                 self.display_status()
-                sleep(2)
+                sleep(1)
 
         # Model form: dT/dt = a*(T - Tamb) + b*u(t) + c
-        self.database.build_model(a, b, c)
-
-    def build_model(self):
-
-        # Grab the data from the current run, only consider data above 100 deg F
-        data = self.all_data()
-        data = data[data['temperature'] > 100.0]
-        data = data.reset_index()
-
-        # Reference time such that it starts at zero
-        time = [dt.total_seconds() for dt in data['time'] - data['time'][0]]
-        k_fit, k_cov = curve_fit(self.integrate_model, time, data['temperature'], p0=[-0.01, 1.0, 0.5])
-
-        # Save the model parameters into the database
-        inserted_model = self.sessions.insert_one({'model_form': 'dT/dt = a*(T - Tamb) + b*u(t) + c',
-                                                   'a': k_fit[0],
-                                                   'b': k_fit[1],
-                                                   'c': k_fit[2]})
+        self.database.build_model()
 
 
 if __name__ == '__main__':
-    grill = GrillBot()
+    grill = GrillBot(URI='5f1f876f74fece3cafacd134')
     grill.train()
 
     #database = GrillDatabase(URI='mongodb://10.0.1.17:27017', session='5f1bbe0474fece04add6d260')
