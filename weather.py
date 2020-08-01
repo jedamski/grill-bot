@@ -5,6 +5,7 @@ import numpy as np
 import pytz
 import pymongo
 from datetime import datetime, timedelta
+import pandas as pd
 
 
 class Weather(object):
@@ -42,6 +43,14 @@ class Weather(object):
         return: a dictionary based on the parsed json response
         """
 
+        # TODO: Add more rigorous type handling
+        if time != None:
+            if type(time) == datetime:
+                time = time.timestamp()
+            elif type(time) != float or type(time) != int:
+                raise ValueError('Invalid type for <time> passed in: {}'.format(type(time)))
+
+        # TODO: Handle database case where time is a value or None
         threshold_time = pytz.utc.localize(datetime.utcnow()) - timedelta(seconds=time_since)
         resp_dict = self.raw_response.find_one({'time': {'$gt': threshold_time}})
 
@@ -51,12 +60,13 @@ class Weather(object):
             # Construct the request url, not currently asking for any fancy pance options
             if time is None:
                 # Submit a forecast request to the API
-                request_url = '{}{}/{},{}/'.format(self.url, self.secret_key, self.latitude, self.longitude)
+                query = '{},{}'.format(self.latitude, self.longitude)
             else:
                 # Submit a time machine request
-                request_url = '{}{}/{},{},{:.0f}/'.format(self.url, self.secret_key, self.latitude, self.longitude, time)
+                query = '{},{},{:.0f}'.format(self.latitude, self.longitude, time)
 
             # Send the API request to DarkSky
+            request_url = '{}{}/{}/'.format(self.url, self.secret_key, query)
             print('Weather: sending forecast request to the API - {}'.format(request_url))
             resp = requests.get(request_url)
 
@@ -71,26 +81,83 @@ class Weather(object):
             timestamp = resp_dict['currently']['time']
             tz = pytz.timezone(resp_dict['timezone'])
             resp_dict['time'] = datetime.fromtimestamp(timestamp, tz)
+            resp_dict['query'] = query
             self.raw_response.insert_one(resp_dict)
 
             return resp_dict
 
     @property
-    def temperature(self):
+    def current(self):
         """
-        This method appears as a class atribute. This returns a two element
-        tuple containing two numpy arrays. The first is an offset-aware numpy
-        array of datetime objects. These represent the temperature forecast for
-        the day on the hour.
+        This method appears as a class atribute. This returns a dictionary with
+        key value pairs where the value is typically a float or a String. It is
+        not guaranteed that every variable will be available time, ex: precip
+        type.
 
-        return: (time - np array of datetime, temp - np array in local unit system)
+        --- EXAMPLE OUTPUT ---
+        time: 1509993277,
+        summary: "Drizzle",
+        icon: "rain",
+        nearestStormDistance: 0,
+        precipIntensity: 0.0089,
+        precipIntensityError: 0.0046,
+        precipProbability: 0.9,
+        precipType: "rain",
+        temperature: 66.1,
+        apparentTemperature: 66.31,
+        dewPoint: 60.77,
+        humidity: 0.83,
+        pressure: 1010.34,
+        windSpeed: 5.59,
+        windGust: 12.03,
+        windBearing: 246,
+        cloudCover: 0.7,
+        uvIndex: 1,
+        visibility: 9.84,
+        ozone: 267.44
         """
 
         # Send the request to the API
         resp_dict = self.download_data()
 
-        return resp_dict['currently']['temperature']
+        return resp_dict['currently']
+
+    def forecast(self, day=None):
+
+        # If day is empty, assume they're asking for todays forecast
+        if day is None:
+            day = pytz.utc.localize(datetime.utcnow())
+
+        # Confirm the object coming in is a datetime object
+        if type(day) != datetime:
+            raise ValueError('Day is of type {}. Please convert to an offset aware datetime object first.'.format(type(day)))
+
+        # Confirm the object coming in is offset aware (has a timezone property)
+        if day.tzinfo is None or day.tzinfo.utcoffset(day) is None:
+            raise ValueError('Day is a naive datetime object. Please assign a timezone before passing in.')
+
+        # TODO: Check if the type is offset aware or naive
+        resp_dict = self.download_data(time=day)
+
+        forecast_data = resp_dict['hourly']['data']
+
+        keys = forecast_data[0]
+        num_entries = len(forecast_data)
+
+        data = {}
+        for key in keys:
+            data[key] = [data_entry[key] for data_entry in forecast_data]
+
+        tz = pytz.timezone(resp_dict['timezone'])
+        data['time'] = [datetime.fromtimestamp(time_value, tz) for time_value in data['time']]
+
+        return pd.DataFrame(data)
 
 if __name__ == '__main__':
+
     weather = Weather()
-    print(weather.temperature)
+    print(weather.current['temperature'])
+    print(weather.current['dewPoint'])
+    print(weather.current['uvIndex'])
+
+    print(weather.forecast())
