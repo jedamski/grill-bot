@@ -16,6 +16,7 @@ import pymongo
 import atexit
 import busio
 import board
+import pytz
 
 
 class Burner(object):
@@ -377,7 +378,7 @@ class GrillDatabase(object):
         for the thermodynamic model and the associated controller.
         """
 
-        # Initialize the client and  connect to the ingredients collection
+        # Initialize the client and  connect to the grill collection
         self.client = pymongo.MongoClient('mongodb://localhost:27017')
 
         # Setup the database and collections
@@ -502,45 +503,6 @@ class GrillDatabase(object):
                                                 'b': k_fit[1],
                                                 'c': k_fit[2]})
 
-class Weather(object):
-
-    def __init__(self):
-
-        # Define the parameters that are unique to me
-        self.url = 'https://api.darksky.net/forecast/'
-        self.secret_key = os.getenv('darksky_key')
-        self.latitude = os.getenv('latitude')
-        self.longitude = os.getenv('longitude')
-
-    def download_data(self, time=None):
-        """
-        Downloads the data from DarkSky API and returns a parsed dictionary from
-        the json data. This function is built to work with both current
-        conditions as well as looking up historical data.
-
-        time (optional): UNIX time stamp, seconds since midnight GMT on 1 Jan 1970
-        return: a dictionary based on the parsed json response
-        """
-
-        # Construct the request url, not currently asking for any fancy pance options
-        if time is None:
-            request_url = '{}{}/{},{}/'.format(self.url, self.secret_key, self.latitude, self.longitude)
-        else:
-            request_url = '{}{}/{},{},{:.0f}/'.format(self.url, self.secret_key, self.latitude, self.longitude, time)
-
-        # Send the API request to DarkSky
-        print('Weather: sending forecast request to the API - {}'.format(request_url))
-        resp = requests.get(request_url)
-
-        # If there is an error, throw an error
-        if resp.status_code != 200:
-            raise RuntimeError('GET /forecast/ {}'.format(resp.status_code))
-
-        # Otherwise, deconstruct the json response
-        resp_dict = resp.json()
-        rcParams['timezone'] = resp_dict['timezone']
-
-        return resp_dict
 
 class GrillBot(object):
 
