@@ -4,8 +4,9 @@ from matplotlib import rcParams
 import numpy as np
 import pytz
 import pymongo
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 import pandas as pd
+from tzlocal import get_localzone
 
 
 class Weather(object):
@@ -21,9 +22,16 @@ class Weather(object):
         # Initialize the client and  connect to the weather collection
         self.client = pymongo.MongoClient('mongodb://localhost:27017')
 
+        # Create a collection for the specified latitude and longitude
+        # TODO: DO this
+
         # Setup the database and collections
         self.weather_database = self.client.weather
-        self.raw_response = self.weather_database.raw_response
+
+        # Create a couple different collections as they will be handled differently in the class
+        self.db_time_machine = self.weather_database.time_machine
+        self.db_forecasts = self.weather_database.forecasts
+        self.db_current = self.weather_database.current
 
     def __get_environment_variable(self, key):
 
@@ -33,7 +41,35 @@ class Weather(object):
 
         return value
 
-    def download_data(self, time=None, time_since=5*60.0):
+    def __darksky(self, time=None):
+        """
+        This method does the heavy lifting of actually grabing the data from
+        the REST API. The calling function is responsible for actually managing
+        the data response.
+        """
+
+        if time is None:
+            # Submit a request without a time, the will return the current weather along with a forecast
+            query = '{},{}'.format(self.latitude, self.longitude)
+        else:
+            # Submit a time machine request, this will return the actual weather for a date in the past
+            query = '{},{},{:.0f}'.format(self.latitude, self.longitude, time)
+
+        # Send the API request to DarkSky
+        request_url = '{}{}/{}/'.format(self.url, self.secret_key, query)
+        print('Weather: sending forecast request to the API - {}'.format(request_url))
+        resp = requests.get(request_url)
+
+        # If there is an error, throw an error
+        if resp.status_code != 200:
+            raise RuntimeError('GET /forecast/ {}'.format(resp.status_code))
+
+        # Otherwise, deconstruct the json response
+        resp_dict = resp.json()
+
+        return resp_dict
+
+    def __get_data(self, time=None):
         """
         Downloads the data from DarkSky API and returns a parsed dictionary from
         the json data. This function is built to work with both current
@@ -43,48 +79,108 @@ class Weather(object):
         return: a dictionary based on the parsed json response
         """
 
-        # TODO: Add more rigorous type handling
-        if time != None:
-            if type(time) == datetime:
-                time = time.timestamp()
-            elif type(time) != float or type(time) != int:
-                raise ValueError('Invalid type for <time> passed in: {}'.format(type(time)))
+        # Confirm the object coming in is a datetime or date object
+        if (type(time) == datetime):
 
-        # TODO: Handle database case where time is a value or None
-        threshold_time = pytz.utc.localize(datetime.utcnow()) - timedelta(seconds=time_since)
-        resp_dict = self.raw_response.find_one({'time': {'$gt': threshold_time}})
-
-        if resp_dict != None:
-            return resp_dict
-        else:
-            # Construct the request url, not currently asking for any fancy pance options
-            if time is None:
-                # Submit a forecast request to the API
-                query = '{},{}'.format(self.latitude, self.longitude)
+            # Confirm the object coming in is offset aware (has a timezone property)
+            if time.tzinfo is None or time.tzinfo.utcoffset(time) is None:
+                raise ValueError('Day is a naive datetime object. Please assign a timezone before passing in.')
             else:
-                # Submit a time machine request
-                query = '{},{},{:.0f}'.format(self.latitude, self.longitude, time)
+                time = time.date()
 
-            # Send the API request to DarkSky
-            request_url = '{}{}/{}/'.format(self.url, self.secret_key, query)
-            print('Weather: sending forecast request to the API - {}'.format(request_url))
-            resp = requests.get(request_url)
+        elif type(time) != date:
+            raise ValueError('Day is of type {}. Please convert to an offset aware datetime object first.'.format(type(time)))
 
-            # If there is an error, throw an error
-            if resp.status_code != 200:
-                raise RuntimeError('GET /forecast/ {}'.format(resp.status_code))
+        # This means that the user is just asking for the current weather. The
+        # database will store all requests here and will just query the database
+        # to get the response if the user has asked in the last x seconds (as
+        # specified by <time_since>).
+        if time is None:
 
-            # Otherwise, deconstruct the json response
-            resp_dict = resp.json()
+            # First, see if there's anything in the database from the last x minutes
+            max_requests_per_day = 250.
+            threshold_time = pytz.utc.localize(datetime.utcnow()) - timedelta(seconds=24.*60.*60./max_requests_per_day)
+            resp_dict = self.db_current.find_one({'time': {'$gt': threshold_time}})
 
-            # Save the response in the database
+            # If we've already asked for something in the last x minutes, don't ask again and just retrieve from the database
+            if resp_dict != None:
+                return resp_dict
+
+            # If we got here, there was nothing in the database from the last x minutes, let's download the data
+            resp_dict = self.__darksky()
+
+            # Grab the current time and store it in an accessible spot in the database
             timestamp = resp_dict['currently']['time']
             tz = pytz.timezone(resp_dict['timezone'])
             resp_dict['time'] = datetime.fromtimestamp(timestamp, tz)
-            resp_dict['query'] = query
-            self.raw_response.insert_one(resp_dict)
+
+            # There is no need to keep previous data in the db_current database.
+            # If the user is looking for all of todays data, they should use the
+            # forecast or time machine features instead. Update the current entry.
+            self.db_current.update_one({}, {'$set': resp_dict}, upsert=True)
 
             return resp_dict
+
+
+        # This means that the user is looking either for todays weather or a
+        # date in the future. This will return in the form of hourly data.
+        elif time >= pytz.utc.localize(datetime.utcnow()).astimezone(get_localzone()).date():
+
+            # If they are asking for today's forecast, we probably want to save
+            # to the database but update frequently as they ask for it.
+            max_requests_per_day = 100.
+            threshold_time = pytz.utc.localize(datetime.utcnow()) - timedelta(seconds=24.*60.*60./max_requests_per_day)
+            resp_dict = self.db_forecasts.find_one({'$and': [{'date': {'$eq': time.strftime('%d-%m-%Y')}},
+                                                             {'time': {'$gt': threshold_time}}]})
+
+            # If we've already asked for this date, don't ask again and just retrieve from the database
+            if resp_dict != None:
+                return resp_dict
+
+            # If we got here, there was nothing in the database from the last x minutes, let's download the data
+            resp_dict = self.__darksky()
+
+            # Grab the current time and store it in an accessible spot in the database
+            resp_dict['time'] = pytz.utc.localize(datetime.utcnow()).astimezone(get_localzone())
+            resp_dict['date'] = time.strftime('%d-%m-%Y')
+
+            # There is no need to keep previous data in the db_current database.
+            # If the user is looking for all of todays data, they should use the
+            # forecast or time machine features instead. Update the current entry.
+            self.db_forecasts.update_one({}, {'$set': resp_dict}, upsert=True)
+
+            return resp_dict
+
+        #
+        # if time is yesterday or earlier
+        #
+        #
+        # # TODO: Add more rigorous type handling
+        # if time != None:
+        #     if type(time) == datetime:
+        #         time = time.timestamp()
+        #     elif type(time) != float or type(time) != int:
+        #         raise ValueError('Invalid type for <time> passed in: {}'.format(type(time)))
+        #
+        # # TODO: Handle database case where time is a value or None
+        # threshold_time = pytz.utc.localize(datetime.utcnow()) - timedelta(seconds=time_since)
+        # resp_dict = self.raw_response.find_one({'$and': [{'time': {'$gt': threshold_time}},
+        #                                                  {'date_supplied': {'$eq': time != None}}]})
+        #
+        # if resp_dict != None:
+        #     return resp_dict
+        # else:
+        #     self.__get_data()
+        #
+        #     # Save the response in the database
+        #     timestamp = resp_dict['currently']['time']
+        #     tz = pytz.timezone(resp_dict['timezone'])
+        #     resp_dict['time'] = datetime.fromtimestamp(timestamp, tz)
+        #     resp_dict['query'] = query
+        #     resp_dict['date_supplied'] = time != None
+        #     self.raw_response.insert_one(resp_dict)
+        #
+        #     return resp_dict
 
     @property
     def current(self):
@@ -118,7 +214,7 @@ class Weather(object):
         """
 
         # Send the request to the API
-        resp_dict = self.download_data()
+        resp_dict = self.__get_data()
 
         return resp_dict['currently']
 
@@ -126,18 +222,10 @@ class Weather(object):
 
         # If day is empty, assume they're asking for todays forecast
         if day is None:
-            day = pytz.utc.localize(datetime.utcnow())
-
-        # Confirm the object coming in is a datetime object
-        if type(day) != datetime:
-            raise ValueError('Day is of type {}. Please convert to an offset aware datetime object first.'.format(type(day)))
-
-        # Confirm the object coming in is offset aware (has a timezone property)
-        if day.tzinfo is None or day.tzinfo.utcoffset(day) is None:
-            raise ValueError('Day is a naive datetime object. Please assign a timezone before passing in.')
+            day = pytz.utc.localize(datetime.utcnow()).astimezone(get_localzone()).date()
 
         # TODO: Check if the type is offset aware or naive
-        resp_dict = self.download_data(time=day)
+        resp_dict = self.__get_data(time=day)
 
         forecast_data = resp_dict['hourly']['data']
 
@@ -156,8 +244,12 @@ class Weather(object):
 if __name__ == '__main__':
 
     weather = Weather()
-    print(weather.current['temperature'])
-    print(weather.current['dewPoint'])
-    print(weather.current['uvIndex'])
-
-    print(weather.forecast())
+    #print(weather.current['temperature'])
+    #print(weather.current['dewPoint'])
+    #print(weather.current['uvIndex'])
+    day1 = pytz.utc.localize(datetime.utcnow()).astimezone(get_localzone()).date()
+    day2 = (pytz.utc.localize(datetime.utcnow()).astimezone(get_localzone())+timedelta(days=1)).date()
+    print(weather.forecast(day1))
+    print(weather.forecast(day2))
+    #print(weather.forecast(pytz.utc.localize(datetime.utcnow()) + timedelta(days=1)))
+    print(day1 <= day2)
