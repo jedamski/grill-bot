@@ -138,7 +138,7 @@ class Weather(object):
                 return resp_dict
 
             # If we got here, there was nothing in the database from the last x minutes, let's download the data
-            resp_dict = self.__darksky()
+            resp_dict = self.__darksky(time=time)
 
             # Grab the current time and store it in an accessible spot in the database
             resp_dict['time'] = pytz.utc.localize(datetime.utcnow()).astimezone(get_localzone())
@@ -225,16 +225,21 @@ class Weather(object):
             day = pytz.utc.localize(datetime.utcnow()).astimezone(get_localzone()).date()
 
         # TODO: Check if the type is offset aware or naive
-        resp_dict = self.__get_data(time=day)
-
+        resp_dict = self.__get_data(time=day.timestamp())
         forecast_data = resp_dict['hourly']['data']
 
-        keys = forecast_data[0]
+        # Grab all of the unique keys that could be generated in the dataset
+        keys = [list(hour.keys()) for hour in resp_dict['hourly']['data']]
+        keys = np.unique([y for x in keys for y in x])
         num_entries = len(forecast_data)
 
-        data = {}
+        data =  {key: [] for key in keys}
         for key in keys:
-            data[key] = [data_entry[key] for data_entry in forecast_data]
+            for data_entry in forecast_data:
+                try:
+                    data[key] += [data_entry[key]]
+                except KeyError:
+                    data[key] += [None]
 
         tz = pytz.timezone(resp_dict['timezone'])
         data['time'] = [datetime.fromtimestamp(time_value, tz) for time_value in data['time']]
@@ -248,8 +253,9 @@ if __name__ == '__main__':
     #print(weather.current['dewPoint'])
     #print(weather.current['uvIndex'])
     day1 = pytz.utc.localize(datetime.utcnow()).astimezone(get_localzone()).date()
-    day2 = (pytz.utc.localize(datetime.utcnow()).astimezone(get_localzone())+timedelta(days=1)).date()
+    day2 = (pytz.utc.localize(datetime.utcnow()).astimezone(get_localzone())+timedelta(days=4)).date()
     print(weather.forecast(day1))
     print(weather.forecast(day2))
+    print(day1)
+    print(day2)
     #print(weather.forecast(pytz.utc.localize(datetime.utcnow()) + timedelta(days=1)))
-    print(day1 <= day2)
