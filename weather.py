@@ -246,6 +246,31 @@ class Weather(object):
 
         return pd.DataFrame(data)
 
+    @staticmethod
+    def date_str(time):
+        """
+        This method will take in a datetime object and return the DarkSky
+        accepted time format in the local timezone. The datetime object must be
+        offset aware.
+        """
+
+        # Convert the passed in timezone to the local timezone
+        time = time.astimezone(get_localzone())
+
+        # Return it using the standardized isoformat. This is a string
+        return time.isoformat()
+
+    @staticmethod
+    def now():
+        """
+        This method returns an offset aware datetime object for the current time
+        in the local timezone.
+        """
+
+        now_utc = datetime.utcnow().replace(tzinfo=pytz.utc)
+        return now_utc.astimezone(get_localzone())
+
+
 if __name__ == '__main__':
 
     weather = Weather()
