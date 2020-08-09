@@ -270,6 +270,17 @@ class Weather(object):
         now_utc = datetime.utcnow().replace(tzinfo=pytz.utc)
         return now_utc.astimezone(get_localzone())
 
+    @staticmethod
+    def date_isoformat(date):
+        """
+        This method will take in a date object and return a datetime at 12AM,
+        the morning of the date in the local timezone. The returned object is an
+        isoformat datetime string.
+        """
+
+        this_datetime = datetime(date.year, date.month, date.day)
+        this_datetime = this_datetime.astimezone(get_localzone())
+        return this_datetime.isoformat()
 
 if __name__ == '__main__':
 
