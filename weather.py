@@ -53,7 +53,7 @@ class Weather(object):
             query = '{},{}'.format(self.latitude, self.longitude)
         else:
             # Submit a time machine request, this will return the actual weather for a date in the past
-            query = '{},{},{:.0f}'.format(self.latitude, self.longitude, time)
+            query = '{},{},{}'.format(self.latitude, self.longitude, self.isoformat(time))
 
         # Send the API request to DarkSky
         request_url = '{}{}/{}/'.format(self.url, self.secret_key, query)
@@ -80,7 +80,7 @@ class Weather(object):
         """
 
         # Confirm the object coming in is a datetime or date object
-        if (type(time) == datetime):
+        if isinstance(time, datetime):
 
             # Confirm the object coming in is offset aware (has a timezone property)
             if time.tzinfo is None or time.tzinfo.utcoffset(time) is None:
@@ -88,7 +88,11 @@ class Weather(object):
             else:
                 time = time.date()
 
-        elif type(time) != date:
+        elif time == None:
+            pass
+
+        elif not isinstance(time, date):
+
             raise ValueError('Day is of type {}. Please convert to an offset aware datetime object first.'.format(type(time)))
 
         # This means that the user is just asking for the current weather. The
@@ -99,7 +103,7 @@ class Weather(object):
 
             # First, see if there's anything in the database from the last x minutes
             max_requests_per_day = 250.
-            threshold_time = pytz.utc.localize(datetime.utcnow()) - timedelta(seconds=24.*60.*60./max_requests_per_day)
+            threshold_time = self.now() - timedelta(seconds=24.*60.*60./max_requests_per_day)
             resp_dict = self.db_current.find_one({'time': {'$gt': threshold_time}})
 
             # If we've already asked for something in the last x minutes, don't ask again and just retrieve from the database
@@ -124,12 +128,13 @@ class Weather(object):
 
         # This means that the user is looking either for todays weather or a
         # date in the future. This will return in the form of hourly data.
-        elif time >= pytz.utc.localize(datetime.utcnow()).astimezone(get_localzone()).date():
+        elif time >= self.now():
 
             # If they are asking for today's forecast, we probably want to save
             # to the database but update frequently as they ask for it.
             max_requests_per_day = 100.
-            threshold_time = pytz.utc.localize(datetime.utcnow()) - timedelta(seconds=24.*60.*60./max_requests_per_day)
+            current_time = self.now()
+            threshold_time = current_time - timedelta(seconds=24.*60.*60./max_requests_per_day)
             resp_dict = self.db_forecasts.find_one({'$and': [{'date': {'$eq': time.strftime('%d-%m-%Y')}},
                                                              {'time': {'$gt': threshold_time}}]})
 
@@ -141,7 +146,7 @@ class Weather(object):
             resp_dict = self.__darksky(time=time)
 
             # Grab the current time and store it in an accessible spot in the database
-            resp_dict['time'] = pytz.utc.localize(datetime.utcnow()).astimezone(get_localzone())
+            resp_dict['time'] = current_time
             resp_dict['date'] = time.strftime('%d-%m-%Y')
 
             # There is no need to keep previous data in the db_current database.
@@ -222,10 +227,10 @@ class Weather(object):
 
         # If day is empty, assume they're asking for todays forecast
         if day is None:
-            day = pytz.utc.localize(datetime.utcnow()).astimezone(get_localzone()).date()
+            day = self.now().date()
 
         # TODO: Check if the type is offset aware or naive
-        resp_dict = self.__get_data(time=day.timestamp())
+        resp_dict = self.__get_data(time=day)
         forecast_data = resp_dict['hourly']['data']
 
         # Grab all of the unique keys that could be generated in the dataset
@@ -247,20 +252,6 @@ class Weather(object):
         return pd.DataFrame(data)
 
     @staticmethod
-    def date_str(time):
-        """
-        This method will take in a datetime object and return the DarkSky
-        accepted time format in the local timezone. The datetime object must be
-        offset aware.
-        """
-
-        # Convert the passed in timezone to the local timezone
-        time = time.astimezone(get_localzone())
-
-        # Return it using the standardized isoformat. This is a string
-        return time.isoformat()
-
-    @staticmethod
     def now():
         """
         This method returns an offset aware datetime object for the current time
@@ -271,27 +262,34 @@ class Weather(object):
         return now_utc.astimezone(get_localzone())
 
     @staticmethod
-    def date_isoformat(date):
+    def date_isoformat(time):
         """
         This method will take in a date object and return a datetime at 12AM,
         the morning of the date in the local timezone. The returned object is an
         isoformat datetime string.
         """
 
-        this_datetime = datetime(date.year, date.month, date.day)
-        this_datetime = this_datetime.astimezone(get_localzone())
+        if isinstance(time, date):
+            this_datetime = datetime(time.year, time.month, time.day)
+            this_datetime = this_datetime.astimezone(get_localzone())
+        elif isinstance(time, datetime):
+            this_datetime = time.astimezone(get_localzone())
+        else:
+            raise ValueError('Unrecognized type: {}'.format(type(time)))
+
         return this_datetime.isoformat()
 
 if __name__ == '__main__':
 
     weather = Weather()
-    #print(weather.current['temperature'])
-    #print(weather.current['dewPoint'])
-    #print(weather.current['uvIndex'])
-    day1 = pytz.utc.localize(datetime.utcnow()).astimezone(get_localzone()).date()
-    day2 = (pytz.utc.localize(datetime.utcnow()).astimezone(get_localzone())+timedelta(days=4)).date()
+    print(weather.current['temperature'])
+    print(weather.current['dewPoint'])
+    print(weather.current['uvIndex'])
+
+    day1 = Weather.now().date()
+    #day2 = (pytz.utc.localize(datetime.utcnow()).astimezone(get_localzone())+timedelta(days=4)).date()
     print(weather.forecast(day1))
-    print(weather.forecast(day2))
-    print(day1)
-    print(day2)
+    #print(weather.forecast(day2))
+    #print(day1)
+    #print(day2)
     #print(weather.forecast(pytz.utc.localize(datetime.utcnow()) + timedelta(days=1)))
