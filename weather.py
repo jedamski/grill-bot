@@ -85,14 +85,15 @@ class Weather(object):
             # Confirm the object coming in is offset aware (has a timezone property)
             if time.tzinfo is None or time.tzinfo.utcoffset(time) is None:
                 raise ValueError('Day is a naive datetime object. Please assign a timezone before passing in.')
-            else:
-                time = time.date()
+
+        # Convert the date object to a datetime object for midnight in the current timezone
+        elif isinstance(time, date):
+            time = self.date_to_datetime(time)
 
         elif time == None:
             pass
 
         elif not isinstance(time, date):
-
             raise ValueError('Day is of type {}. Please convert to an offset aware datetime object first.'.format(type(time)))
 
         # This means that the user is just asking for the current weather. The
@@ -128,7 +129,7 @@ class Weather(object):
 
         # This means that the user is looking either for todays weather or a
         # date in the future. This will return in the form of hourly data.
-        elif time >= self.now():
+        elif time.date() >= self.now().date():
 
             # If they are asking for today's forecast, we probably want to save
             # to the database but update frequently as they ask for it.
@@ -149,14 +150,35 @@ class Weather(object):
             resp_dict['time'] = current_time
             resp_dict['date'] = time.strftime('%d-%m-%Y')
 
-            # There is no need to keep previous data in the db_current database.
-            # If the user is looking for all of todays data, they should use the
-            # forecast or time machine features instead. Update the current entry.
-            self.db_forecasts.update_one({}, {'$set': resp_dict}, upsert=True)
+            # Update the database with the forecast. Update if it is expired.
+            self.db_forecasts.update_one({'date': {'$eq': time.strftime('%d-%m-%Y')}}, {'$set': resp_dict}, upsert=True)
 
             return resp_dict
 
-        #
+        # This means that the user is looking either for todays weather or a
+        # date in the future. This will return in the form of hourly data.
+        elif time.date() < self.now().date():
+
+            # See if the data is already in the database
+            resp_dict = self.db_time_machine.find_one({'date': {'$eq': time.strftime('%d-%m-%Y')}})
+
+            # If we've already asked for this date, don't ask again and just retrieve from the database
+            if resp_dict != None:
+                return resp_dict
+
+            # If we got here, there was nothing in the database from the last x minutes, let's download the data
+            resp_dict = self.__darksky(time=time)
+
+            # Grab the current time and store it in an accessible spot in the database
+            resp_dict['time'] = self.now()
+            resp_dict['date'] = time.strftime('%d-%m-%Y')
+
+            # Update the database with the forecast. Update if it is expired.
+            self.db_time_machine.insert_one(resp_dict)
+
+            return resp_dict
+
+            #
         # if time is yesterday or earlier
         #
         #
@@ -223,11 +245,13 @@ class Weather(object):
 
         return resp_dict['currently']
 
-    def forecast(self, day=None):
+    def hourly(self, day=None):
 
         # If day is empty, assume they're asking for todays forecast
         if day is None:
             day = self.now().date()
+        else:
+            day = day.date()
 
         # TODO: Check if the type is offset aware or naive
         resp_dict = self.__get_data(time=day)
@@ -262,7 +286,15 @@ class Weather(object):
         return now_utc.astimezone(get_localzone())
 
     @staticmethod
-    def date_isoformat(time):
+    def date_to_datetime(date):
+
+        this_datetime = datetime(date.year, date.month, date.day)
+        this_datetime = this_datetime.astimezone(get_localzone())
+
+        return this_datetime
+
+    @staticmethod
+    def isoformat(time):
         """
         This method will take in a date object and return a datetime at 12AM,
         the morning of the date in the local timezone. The returned object is an
@@ -270,8 +302,7 @@ class Weather(object):
         """
 
         if isinstance(time, date):
-            this_datetime = datetime(time.year, time.month, time.day)
-            this_datetime = this_datetime.astimezone(get_localzone())
+            this_datetime = Weather.date_to_datetime(time)
         elif isinstance(time, datetime):
             this_datetime = time.astimezone(get_localzone())
         else:
